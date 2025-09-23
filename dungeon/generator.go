@@ -1,7 +1,6 @@
 package dungeon
 
 import (
-	"fmt"
 	"math/rand"
 	"time"
 )
@@ -14,7 +13,6 @@ const (
 	TileWall  = 0
 	TileFloor = 1
 	TileExit  = 2
-	TileEntry = 3
 )
 
 const (
@@ -23,12 +21,13 @@ const (
 	ColorYellow = "\x1b[33m"
 	ColorGreen  = "\x1b[32m"
 	ColorRed    = "\x1b[31m"
+	ColorCyan   = "\x1b[36m"
 	ColorReset  = "\x1b[0m"
 )
 
 type Point struct{ X, Y int }
 
-func GenerateDungeon(width, height int) ([][]int, []Point) {
+func GenerateDungeon(width, height int) ([][]int, []Point, Point) {
 	source := rand.NewSource(time.Now().UnixNano())
 	random := rand.New(source)
 
@@ -88,6 +87,7 @@ func GenerateDungeon(width, height int) ([][]int, []Point) {
 		}
 	}
 
+	var startTile Point
 	if len(floorTiles) > 1 {
 		exitIndex := random.Intn(len(floorTiles))
 		exitTile := floorTiles[exitIndex]
@@ -95,12 +95,11 @@ func GenerateDungeon(width, height int) ([][]int, []Point) {
 		floorTiles = append(floorTiles[:exitIndex], floorTiles[exitIndex+1:]...)
 
 		startIndex := random.Intn(len(floorTiles))
-		startTile := floorTiles[startIndex]
-		dungeon[startTile.Y][startTile.X] = TileEntry
+		startTile = floorTiles[startIndex]
 		floorTiles = append(floorTiles[:startIndex], floorTiles[startIndex+1:]...)
 	}
 
-	return dungeon, floorTiles
+	return dungeon, floorTiles, startTile
 }
 
 func carveCorridor(dungeon [][]int, p1, p2 Point) {
@@ -111,36 +110,6 @@ func carveCorridor(dungeon [][]int, p1, p2 Point) {
 	}
 	for y := min(y1, y2); y <= max(y1, y2); y++ {
 		dungeon[y][x2] = TileFloor
-	}
-}
-
-func PrintDungeon(dungeonMap [][]int, monsters []Point) {
-	monsterMap := make(map[Point]bool)
-	for _, m := range monsters {
-		monsterMap[m] = true
-	}
-
-	for y := 0; y < len(dungeonMap); y++ {
-		for x := 0; x < len(dungeonMap[y]); x++ {
-			currentPoint := Point{X: x, Y: y}
-
-			if monsterMap[currentPoint] {
-				fmt.Print(ColorRed + "M" + ColorReset)
-				continue
-			}
-
-			switch dungeonMap[y][x] {
-			case TileWall:
-				fmt.Print(ColorGrey + "█" + ColorReset)
-			case TileFloor:
-				fmt.Print(ColorWhite + "░" + ColorReset)
-			case TileExit:
-				fmt.Print(ColorYellow + ">" + ColorReset)
-			case TileEntry:
-				fmt.Print(ColorGreen + "<" + ColorReset)
-			}
-		}
-		fmt.Println()
 	}
 }
 
