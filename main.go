@@ -4,6 +4,11 @@ import (
 	"dunExpo/dungeon"
 	"dunExpo/game"
 	"fmt"
+	"log"
+	"math/rand"
+	"os"
+
+	"github.com/eiannone/keyboard"
 )
 
 type GameState struct {
@@ -13,6 +18,8 @@ type GameState struct {
 }
 
 func render(state GameState) {
+	fmt.Print("\033[H\033[2J")
+
 	monsterMap := make(map[dungeon.Point]*game.Monster)
 	for _, m := range state.Monsters {
 		monsterMap[m.Position] = m
@@ -43,7 +50,9 @@ func render(state GameState) {
 		}
 		fmt.Println()
 	}
+	fmt.Printf("\nHP: %d/%d | Monsters: %d | Use WASD/Arrows to move, Q/Esc to quit.\n", state.Player.HP, state.Player.MaxHP, len(state.Monsters))
 }
+
 func main() {
 	dungeonMap, floorTiles, startPos := dungeon.GenerateDungeon(dungeon.MapWidth, dungeon.MapHeight)
 	monsters := game.SpawnMonsters(floorTiles)
@@ -55,10 +64,86 @@ func main() {
 		Player:   player,
 	}
 
-	
-	fmt.Printf("HP: %d/%d | Monsters: %d\n\n", gameState.Player.HP, gameState.Player.MaxHP, len(gameState.Monsters))
+	if err := keyboard.Open(); err != nil {
+		log.Fatal(err)
+	}
+	defer keyboard.Close()
 
-	render(gameState)
+	for {
+		render(gameState)
 
-	fmt.Println("\nmeow")
+		char, key, err := keyboard.GetKey()
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		switch {
+		case char == 'w' || key == keyboard.KeyArrowUp:
+			player.Move(0, -1, gameState.Dungeon)
+		case char == 'a' || key == keyboard.KeyArrowLeft:
+			player.Move(-1, 0, gameState.Dungeon)
+		case char == 's' || key == keyboard.KeyArrowDown:
+			player.Move(0, 1, gameState.Dungeon)
+		case char == 'd' || key == keyboard.KeyArrowRight:
+			player.Move(1, 0, gameState.Dungeon)
+		case char == 'q' || key == keyboard.KeyEsc:
+			os.Exit(0)
+		}
+
+		for _, monster := range gameState.Monsters {
+			visionRadius := monster.Template.VisionRadius
+			leashRadius := monster.Template.LeashRadius
+
+			distToPlayer := game.Distance(monster.Position, player.Position)
+			distToSpawn := game.Distance(monster.Position, monster.SpawnPoint)
+
+			if distToPlayer <= visionRadius && distToSpawn < leashRadius {
+				dx, dy := 0, 0
+				if player.Position.X > monster.Position.X {
+					dx = 1
+				} else if player.Position.X < monster.Position.X {
+					dx = -1
+				}
+				if player.Position.Y > monster.Position.Y {
+					dy = 1
+				} else if player.Position.Y < monster.Position.Y {
+					dy = -1
+				}
+				if rand.Intn(2) == 0 {
+					monster.Move(dx, 0, gameState.Dungeon)
+				} else {
+					monster.Move(0, dy, gameState.Dungeon)
+				}
+			} else if distToSpawn > 0 {
+				dx, dy := 0, 0
+				if monster.SpawnPoint.X > monster.Position.X {
+					dx = 1
+				} else if monster.SpawnPoint.X < monster.Position.X {
+					dx = -1
+				}
+				if monster.SpawnPoint.Y > monster.Position.Y {
+					dy = 1
+				} else if monster.SpawnPoint.Y < monster.Position.Y {
+					dy = -1
+				}
+				if rand.Intn(2) == 0 {
+					monster.Move(dx, 0, gameState.Dungeon)
+				} else {
+					monster.Move(0, dy, gameState.Dungeon)
+				}
+			} else {
+				direction := rand.Intn(4)
+				switch direction {
+				case 0:
+					monster.Move(0, -1, gameState.Dungeon)
+				case 1:
+					monster.Move(0, 1, gameState.Dungeon)
+				case 2:
+					monster.Move(-1, 0, gameState.Dungeon)
+				case 3:
+					monster.Move(1, 0, gameState.Dungeon)
+				}
+			}
+		}
+	}
 }

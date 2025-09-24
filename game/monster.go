@@ -12,7 +12,9 @@ type MonsterTemplate struct {
 	Color     string
 	HP        int
 	Attack    int
-	SpawnType string
+	SpawnType string	
+	VisionRadius int
+	LeashRadius int
 }
 
 var Bestiary = map[string]MonsterTemplate{
@@ -23,6 +25,8 @@ var Bestiary = map[string]MonsterTemplate{
 		HP:        5,
 		Attack:    1,
 		SpawnType: "pack",
+		VisionRadius :8,
+		LeashRadius : 12,
 	},
 	"ogre": {
 		Name:      "Ogre",
@@ -31,6 +35,8 @@ var Bestiary = map[string]MonsterTemplate{
 		HP:        25,
 		Attack:    5,
 		SpawnType: "single",
+		VisionRadius:7,
+		LeashRadius:20,
 	},
 	"skeleton_archer": {
 		Name:      "Skeleton Archer",
@@ -39,6 +45,8 @@ var Bestiary = map[string]MonsterTemplate{
 		HP:        10,
 		Attack:    2,
 		SpawnType: "single",
+		VisionRadius: 12 ,
+		LeashRadius: 10,
 	},
 }
 
@@ -46,8 +54,39 @@ type Monster struct {
 	Template  *MonsterTemplate
 	Position  dungeon.Point
 	CurrentHP int
+	SpawnPoint dungeon.Point
+
 }
 
+
+func (m *Monster) Move(dx, dy int, dungeonMap [][]int) {
+	// Calculate the potential new position
+	newPos := dungeon.Point{X: m.Position.X + dx, Y: m.Position.Y + dy}
+
+	if newPos.X < 0 || newPos.X >= len(dungeonMap[0]) {
+		return // If it's off the map horizontally, stop right here.
+	}
+
+	if newPos.Y < 0 || newPos.Y >= len(dungeonMap) {
+		return // If it's off the map vertically, stop right here.
+	}
+
+	if dungeonMap[newPos.Y][newPos.X] != dungeon.TileWall {
+		m.Position = newPos
+	}
+}
+
+func Distance(p1, p2 dungeon.Point) int {
+	dx := p1.X - p2.X
+	if dx < 0 {
+		dx = -dx
+	}
+	dy := p1.Y - p2.Y
+	if dy < 0 {
+		dy = -dy
+	}
+	return dx + dy
+}
 func SpawnMonsters(validSpawnPoints []dungeon.Point) []*Monster {
 	source := rand.NewSource(time.Now().UnixNano())
 	random := rand.New(source)
@@ -72,6 +111,7 @@ func SpawnMonsters(validSpawnPoints []dungeon.Point) []*Monster {
 			Template:  &template,
 			Position:  spawnPoint,
 			CurrentHP: template.HP,
+			SpawnPoint: spawnPoint,
 		}
 		monsters = append(monsters, newMonster)
 
@@ -88,6 +128,7 @@ func SpawnMonsters(validSpawnPoints []dungeon.Point) []*Monster {
 					Template:  &template,
 					Position:  packMemberSpawnPoint,
 					CurrentHP: template.HP,
+					SpawnPoint: packMemberSpawnPoint,
 				}
 				monsters = append(monsters, packMonster)
 			}
