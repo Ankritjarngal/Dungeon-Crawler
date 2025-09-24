@@ -37,3 +37,12 @@ func (gs *GameState) GetRandomSpawnPoint() dungeon.Point {
 	}
 	return dungeon.Point{}
 }
+
+const logSize = 5
+
+func (gs *GameState) AddMessage(message string) {
+	gs.Log = append([]string{message}, gs.Log...)
+	if len(gs.Log) > logSize {
+		gs.Log = gs.Log[:logSize]
+	}
+}

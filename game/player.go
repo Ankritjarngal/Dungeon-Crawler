@@ -1,6 +1,9 @@
 package game
 
-import "dunExpo/dungeon"
+import (
+	"dunExpo/dungeon"
+	"fmt"
+)
 
 type Player struct {
 	ID       string
@@ -56,11 +59,13 @@ func Distance(p1, p2 dungeon.Point) int {
 	return dx + dy
 }
 
-func ProcessPlayerCommand(playerID, command string, state *GameState) {
+func ProcessPlayerCommand(playerID, command string, state *GameState) map[string]bool {
+	playersToRemove := make(map[string]bool)
 	player, ok := state.Players[playerID]
 	if !ok {
-		return
+		return playersToRemove
 	}
+
 	var attackedMonster *Monster
 	switch command {
 	case "w":
@@ -74,9 +79,47 @@ func ProcessPlayerCommand(playerID, command string, state *GameState) {
 	}
 
 	if attackedMonster != nil {
-		attackedMonster.CurrentHP -= player.Attack
+		damage := player.Attack
+		attackedMonster.CurrentHP -= damage
+		state.AddMessage(fmt.Sprintf("%s attacks the %s for %d damage!", player.ID, attackedMonster.Template.Name, damage))
+
 		if attackedMonster.CurrentHP > 0 {
-			player.HP -= attackedMonster.Template.Attack
+			damage = attackedMonster.Template.Attack
+			player.HP -= damage
+			state.AddMessage(fmt.Sprintf("%s attacks %s for %d damage!", attackedMonster.Template.Name, player.ID, damage))
+			if player.HP <= 0 {
+				playersToRemove[playerID] = true
+				state.AddMessage(fmt.Sprintf("%s has been defeated!", player.ID))
+			}
+		} else {
+			state.AddMessage(fmt.Sprintf("%s is defeated!", attackedMonster.Template.Name))
 		}
 	}
+
+	var survivingMonsters []*Monster
+	for _, m := range state.Monsters {
+		if m.CurrentHP > 0 {
+			survivingMonsters = append(survivingMonsters, m)
+		}
+	}
+	state.Monsters = survivingMonsters
+
+	if p, ok := state.Players[playerID]; ok {
+		if state.Dungeon[p.Position.Y][p.Position.X] == dungeon.TileHealth {
+			healAmount := 10
+			p.HP += healAmount
+			if p.HP > p.MaxHP {
+				p.HP = p.MaxHP
+			}
+			state.Dungeon[p.Position.Y][p.Position.X] = dungeon.TileFloor
+			state.AddMessage(fmt.Sprintf("%s drinks from the fountain and recovers %d HP.", p.ID, healAmount))
+		}
+
+		if p.Position == state.ExitPos {
+			playersToRemove[playerID] = true
+			state.AddMessage(fmt.Sprintf("%s has escaped the dungeon! VICTORY!", p.ID))
+		}
+	}
+
+	return playersToRemove
 }

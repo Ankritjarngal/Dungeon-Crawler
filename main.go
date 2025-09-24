@@ -10,6 +10,7 @@ import (
 	"net"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/google/uuid"
 )
@@ -82,7 +83,7 @@ func (g *Game) RemoveClient(playerID string) {
 		client.Conn.Close()
 		delete(g.Clients, playerID)
 		delete(g.GameState.Players, playerID)
-		log.Printf("Player %s has been removed.", playerID)
+		log.Printf("Player %s has been removed from the game.", playerID)
 	}
 }
 
@@ -122,8 +123,15 @@ func (g *Game) RunLoop() {
 		if cmd.Command == "quit" {
 			g.RemoveClient(cmd.PlayerID)
 		} else {
-			game.ProcessPlayerCommand(cmd.PlayerID, cmd.Command, &g.GameState)
-			game.UpdateMonsters(&g.GameState)
+			playersToRemoveFromPlayerTurn := game.ProcessPlayerCommand(cmd.PlayerID, cmd.Command, &g.GameState)
+			playersToRemoveFromMonsterTurn := game.UpdateMonsters(&g.GameState)
+
+			for id := range playersToRemoveFromPlayerTurn {
+				g.RemoveClient(id)
+			}
+			for id := range playersToRemoveFromMonsterTurn {
+				g.RemoveClient(id)
+			}
 		}
 
 		g.BroadcastState()
@@ -140,6 +148,8 @@ func main() {
 	}
 	defer listener.Close()
 	log.Println("Game server started on port 8080...")
+	log.Printf("It is currently %s in Srinagar.", time.Now().Format("3:04 PM"))
+
 
 	for {
 		conn, err := listener.Accept()

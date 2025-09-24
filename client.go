@@ -70,8 +70,8 @@ func render(state game.GameState) {
 		fmt.Println("\nConnecting...")
 	}
 
-	for _, msg := range state.Log {
-		fmt.Println(msg)
+	for i := len(state.Log) - 1; i >= 0; i-- {
+		fmt.Println(state.Log[i])
 	}
 }
 
@@ -106,13 +106,13 @@ func main() {
 				log.Println("Server connection lost.")
 				os.Exit(0)
 			}
-			var stateMsg map[string]json.RawMessage
-			if err := json.Unmarshal(jsonMsg, &stateMsg); err != nil {
+			var msg map[string]json.RawMessage
+			if err := json.Unmarshal(jsonMsg, &msg); err != nil {
 				continue
 			}
-			if string(stateMsg["type"]) == "\"state\""{
+			if t, ok := msg["type"]; ok && string(t) == "\"state\"" {
 				var gameState game.GameState
-				if err := json.Unmarshal(stateMsg["data"], &gameState); err != nil {
+				if err := json.Unmarshal(msg["data"], &gameState); err != nil {
 					log.Printf("Error unmarshalling game state: %v", err)
 					continue
 				}

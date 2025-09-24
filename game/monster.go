@@ -2,6 +2,7 @@ package game
 
 import (
 	"dunExpo/dungeon"
+	"fmt"
 	"math/rand"
 	"time"
 )
@@ -127,12 +128,17 @@ func SpawnMonsters(validSpawnPoints []dungeon.Point) []*Monster {
 	return monsters
 }
 
-func UpdateMonsters(state *GameState) {
+func UpdateMonsters(state *GameState) map[string]bool {
+	playersToRemove := make(map[string]bool)
+	state.Log = []string{}
 	for _, monster := range state.Monsters {
 		var closestPlayer *Player
 		minDist := -1
 
 		for _, player := range state.Players {
+			if player.HP <= 0 {
+				continue
+			}
 			dist := Distance(monster.Position, player.Position)
 			if minDist == -1 || dist < minDist {
 				minDist = dist
@@ -150,7 +156,13 @@ func UpdateMonsters(state *GameState) {
 		leashRadius := monster.Template.LeashRadius
 
 		if distToPlayer == 1 {
-			closestPlayer.HP -= monster.Template.Attack
+			damage := monster.Template.Attack
+			closestPlayer.HP -= damage
+			state.AddMessage(fmt.Sprintf("%s attacks %s for %d damage!", monster.Template.Name, closestPlayer.ID, damage))
+			if closestPlayer.HP <= 0 {
+				playersToRemove[closestPlayer.ID] = true
+				state.AddMessage(fmt.Sprintf("%s has been defeated by a %s!", closestPlayer.ID, monster.Template.Name))
+			}
 			continue
 		}
 
@@ -202,4 +214,5 @@ func UpdateMonsters(state *GameState) {
 			}
 		}
 	}
+	return playersToRemove
 }
