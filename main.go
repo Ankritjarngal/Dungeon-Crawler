@@ -7,17 +7,12 @@ import (
 	"log"
 	"math/rand"
 	"os"
+	"time"
 
 	"github.com/eiannone/keyboard"
 )
 
-type GameState struct {
-	Dungeon  [][]int
-	Monsters []*game.Monster
-	Player   *game.Player
-}
-
-func render(state GameState) {
+func render(state game.GameState) {
 	fmt.Print("\033[H\033[2J")
 
 	monsterMap := make(map[dungeon.Point]*game.Monster)
@@ -33,7 +28,6 @@ func render(state GameState) {
 				fmt.Print(dungeon.ColorCyan + "@" + dungeon.ColorReset)
 				continue
 			}
-
 			if monster, ok := monsterMap[currentPoint]; ok {
 				fmt.Print(monster.Template.Color + string(monster.Template.Rune) + dungeon.ColorReset)
 				continue
@@ -58,7 +52,7 @@ func main() {
 	monsters := game.SpawnMonsters(floorTiles)
 	player := game.NewPlayer(startPos)
 
-	gameState := GameState{
+	gameState := game.GameState{
 		Dungeon:  dungeonMap,
 		Monsters: monsters,
 		Player:   player,
@@ -69,6 +63,8 @@ func main() {
 	}
 	defer keyboard.Close()
 
+	rand.Seed(time.Now().UnixNano())
+
 	for {
 		render(gameState)
 
@@ -77,25 +73,52 @@ func main() {
 			log.Fatal(err)
 		}
 
+		var attackedMonster *game.Monster
 		switch {
 		case char == 'w' || key == keyboard.KeyArrowUp:
-			player.Move(0, -1, gameState.Dungeon)
+			attackedMonster = player.Move(0, -1, &gameState)
 		case char == 'a' || key == keyboard.KeyArrowLeft:
-			player.Move(-1, 0, gameState.Dungeon)
+			attackedMonster = player.Move(-1, 0, &gameState)
 		case char == 's' || key == keyboard.KeyArrowDown:
-			player.Move(0, 1, gameState.Dungeon)
+			attackedMonster = player.Move(0, 1, &gameState)
 		case char == 'd' || key == keyboard.KeyArrowRight:
-			player.Move(1, 0, gameState.Dungeon)
+			attackedMonster = player.Move(1, 0, &gameState)
 		case char == 'q' || key == keyboard.KeyEsc:
+			os.Exit(0)
+		}
+
+		if attackedMonster != nil {
+			attackedMonster.CurrentHP -= player.Attack
+			if attackedMonster.CurrentHP > 0 {
+				player.HP -= attackedMonster.Template.Attack
+			}
+		}
+
+		var survivingMonsters []*game.Monster
+		for _, m := range gameState.Monsters {
+			if m.CurrentHP > 0 {
+				survivingMonsters = append(survivingMonsters, m)
+			}
+		}
+		gameState.Monsters = survivingMonsters
+
+		if player.HP <= 0 {
+			render(gameState)
+			fmt.Println("\n\nYou have been defeated. GAME OVER.")
+			keyboard.GetKey()
 			os.Exit(0)
 		}
 
 		for _, monster := range gameState.Monsters {
 			visionRadius := monster.Template.VisionRadius
 			leashRadius := monster.Template.LeashRadius
-
 			distToPlayer := game.Distance(monster.Position, player.Position)
 			distToSpawn := game.Distance(monster.Position, monster.SpawnPoint)
+
+			if distToPlayer == 1 {
+				player.HP -= monster.Template.Attack
+				continue
+			}
 
 			if distToPlayer <= visionRadius && distToSpawn < leashRadius {
 				dx, dy := 0, 0
@@ -110,9 +133,9 @@ func main() {
 					dy = -1
 				}
 				if rand.Intn(2) == 0 {
-					monster.Move(dx, 0, gameState.Dungeon)
+					monster.Move(dx, 0, &gameState)
 				} else {
-					monster.Move(0, dy, gameState.Dungeon)
+					monster.Move(0, dy, &gameState)
 				}
 			} else if distToSpawn > 0 {
 				dx, dy := 0, 0
@@ -127,21 +150,21 @@ func main() {
 					dy = -1
 				}
 				if rand.Intn(2) == 0 {
-					monster.Move(dx, 0, gameState.Dungeon)
+					monster.Move(dx, 0, &gameState)
 				} else {
-					monster.Move(0, dy, gameState.Dungeon)
+					monster.Move(0, dy, &gameState)
 				}
 			} else {
 				direction := rand.Intn(4)
 				switch direction {
 				case 0:
-					monster.Move(0, -1, gameState.Dungeon)
+					monster.Move(0, -1, &gameState)
 				case 1:
-					monster.Move(0, 1, gameState.Dungeon)
+					monster.Move(0, 1, &gameState)
 				case 2:
-					monster.Move(-1, 0, gameState.Dungeon)
+					monster.Move(-1, 0, &gameState)
 				case 3:
-					monster.Move(1, 0, gameState.Dungeon)
+					monster.Move(1, 0, &gameState)
 				}
 			}
 		}
