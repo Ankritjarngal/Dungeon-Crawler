@@ -6,25 +6,23 @@ import (
 )
 
 const (
-	MapWidth  = 80
-	MapHeight = 45
-)
-const (
-	TileWall  = 0
-	TileFloor = 1
-	TileExit  = 2
-	TileHealth =3 
+	MapWidth   = 80
+	MapHeight  = 45
+	TileWall   = 0
+	TileFloor  = 1
+	TileExit   = 2
+	TileHealth = 3
 )
 
 const (
-	ColorGrey   = "\x1b[90m"
-	ColorWhite  = "\x1b[37m"
-	ColorYellow = "\x1b[33m"
-	ColorGreen  = "\x1b[32m"
-	ColorRed    = "\x1b[31m"
-	ColorCyan   = "\x1b[36m"
-	ColorReset  = "\x1b[0m"
+	ColorGrey    = "\x1b[90m"
+	ColorWhite   = "\x1b[37m"
+	ColorYellow  = "\x1b[93m"
+	ColorGreen   = "\x1b[92m"
+	ColorRed     = "\x1b[91m"
+	ColorCyan    = "\x1b[36m"
 	ColorMagenta = "\x1b[95m"
+	ColorReset   = "\x1b[0m"
 )
 
 type Point struct{ X, Y int }
@@ -32,7 +30,6 @@ type Point struct{ X, Y int }
 func GenerateDungeon(width, height int) ([][]int, []Point, Point, Point) {
 	source := rand.NewSource(time.Now().UnixNano())
 	random := rand.New(source)
-
 	dungeon := make([][]int, height)
 	for y := 0; y < height; y++ {
 		dungeon[y] = make([]int, width)
@@ -40,16 +37,13 @@ func GenerateDungeon(width, height int) ([][]int, []Point, Point, Point) {
 			dungeon[y][x] = TileWall
 		}
 	}
-
 	numWalkers := 20
 	walkLength := 150
 	var walkerStartPoints []Point
-
 	for i := 0; i < numWalkers; i++ {
 		walkerX := random.Intn(width)
 		walkerY := random.Intn(height)
 		walkerStartPoints = append(walkerStartPoints, Point{X: walkerX, Y: walkerY})
-
 		for j := 0; j < walkLength; j++ {
 			dungeon[walkerY][walkerX] = TileFloor
 			direction := random.Intn(4)
@@ -73,13 +67,11 @@ func GenerateDungeon(width, height int) ([][]int, []Point, Point, Point) {
 			}
 		}
 	}
-
 	for i := 1; i < len(walkerStartPoints); i++ {
 		p1 := walkerStartPoints[i-1]
 		p2 := walkerStartPoints[i]
 		carveCorridor(dungeon, p1, p2)
 	}
-
 	var floorTiles []Point
 	for y := 0; y < height; y++ {
 		for x := 0; x < width; x++ {
@@ -88,7 +80,6 @@ func GenerateDungeon(width, height int) ([][]int, []Point, Point, Point) {
 			}
 		}
 	}
-
 	var startTile, endTile Point
 	if len(floorTiles) > 1 {
 		exitIndex := random.Intn(len(floorTiles))
@@ -96,25 +87,18 @@ func GenerateDungeon(width, height int) ([][]int, []Point, Point, Point) {
 		dungeon[exitTile.Y][exitTile.X] = TileExit
 		endTile = exitTile
 		floorTiles = append(floorTiles[:exitIndex], floorTiles[exitIndex+1:]...)
-
 		startIndex := random.Intn(len(floorTiles))
 		startTile = floorTiles[startIndex]
 		floorTiles = append(floorTiles[:startIndex], floorTiles[startIndex+1:]...)
 	}
-
-
-	numFountains := 3 
+	numFountains := 3
 	for i := 0; i < numFountains && len(floorTiles) > 0; i++ {
 		fountainIndex := random.Intn(len(floorTiles))
 		fountainTile := floorTiles[fountainIndex]
-
 		dungeon[fountainTile.Y][fountainTile.X] = TileHealth
-
 		floorTiles = append(floorTiles[:fountainIndex], floorTiles[fountainIndex+1:]...)
 	}
-
 	return dungeon, floorTiles, startTile, endTile
-
 }
 
 func carveCorridor(dungeon [][]int, p1, p2 Point) {
@@ -134,6 +118,7 @@ func min(a, b int) int {
 	}
 	return b
 }
+
 func max(a, b int) int {
 	if a > b {
 		return a

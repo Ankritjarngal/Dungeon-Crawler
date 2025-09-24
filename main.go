@@ -1,212 +1,152 @@
 package main
 
 import (
+	"bufio"
 	"dunExpo/dungeon"
 	"dunExpo/game"
-	"fmt"
+	"encoding/json"
+	"io"
 	"log"
-	"math/rand"
-	"os"
-	"time"
+	"net"
+	"strings"
+	"sync"
 
-	"github.com/eiannone/keyboard"
+	"github.com/google/uuid"
 )
 
-const logSize = 5
+type Client struct {
+	Conn       net.Conn
+	PlayerID   string
+	CmdChannel chan<- ClientCommand
+}
 
-func addMessage(state *game.GameState, message string) {
-	state.Log = append([]string{message}, state.Log...)
-	if len(state.Log) > logSize {
-		state.Log = state.Log[:logSize]
+type ClientCommand struct {
+	PlayerID string
+	Command  string
+}
+
+type Game struct {
+	GameState     game.GameState
+	Clients       map[string]*Client
+	mux           sync.Mutex
+	CommandStream chan ClientCommand
+}
+
+func NewGame() *Game {
+	dungeonMap, floorTiles, _, endPos := dungeon.GenerateDungeon(dungeon.MapWidth, dungeon.MapHeight)
+	monsters := game.SpawnMonsters(floorTiles)
+
+	gs := game.GameState{
+		Dungeon:  dungeonMap,
+		Monsters: monsters,
+		Players:  make(map[string]*game.Player),
+		ExitPos:  endPos,
+	}
+
+	return &Game{
+		GameState:     gs,
+		Clients:       make(map[string]*Client),
+		CommandStream: make(chan ClientCommand),
 	}
 }
 
-func render(state game.GameState) {
-	fmt.Print("\033[H\033[2J")
-	monsterMap := make(map[dungeon.Point]*game.Monster)
-	for _, m := range state.Monsters {
-		monsterMap[m.Position] = m
+func (g *Game) AddClient(conn net.Conn) {
+	g.mux.Lock()
+	defer g.mux.Unlock()
+
+	playerID := uuid.New().String()
+	startPos := g.GameState.GetRandomSpawnPoint()
+	newPlayer := game.NewPlayer(playerID, startPos)
+	g.GameState.Players[playerID] = newPlayer
+
+	client := &Client{
+		Conn:       conn,
+		PlayerID:   playerID,
+		CmdChannel: g.CommandStream,
+	}
+	g.Clients[playerID] = client
+
+	welcomeMsg := map[string]string{"type": "welcome", "id": playerID}
+	jsonMsg, _ := json.Marshal(welcomeMsg)
+	client.Conn.Write(append(jsonMsg, '\n'))
+
+	log.Printf("Player %s (%s) has joined.", playerID, conn.RemoteAddr())
+	go client.Listen()
+}
+
+func (g *Game) RemoveClient(playerID string) {
+	g.mux.Lock()
+	defer g.mux.Unlock()
+
+	if client, ok := g.Clients[playerID]; ok {
+		client.Conn.Close()
+		delete(g.Clients, playerID)
+		delete(g.GameState.Players, playerID)
+		log.Printf("Player %s has been removed.", playerID)
+	}
+}
+
+func (g *Game) BroadcastState() {
+	g.mux.Lock()
+	defer g.mux.Unlock()
+
+	stateMsg := map[string]interface{}{"type": "state", "data": g.GameState}
+	jsonState, err := json.Marshal(stateMsg)
+	if err != nil {
+		log.Printf("Error marshalling game state: %v", err)
+		return
 	}
 
-	for y := 0; y < len(state.Dungeon); y++ {
-		for x := 0; x < len(state.Dungeon[y]); x++ {
-			currentPoint := dungeon.Point{X: x, Y: y}
-			if state.Player.Position == currentPoint {
-				fmt.Print(dungeon.ColorCyan + "@" + dungeon.ColorReset)
-				continue
-			}
-			if monster, ok := monsterMap[currentPoint]; ok {
-				fmt.Print(monster.Template.Color + string(monster.Template.Rune) + dungeon.ColorReset)
-				continue
-			}
-			switch state.Dungeon[y][x] {
-			case dungeon.TileWall:
-				fmt.Print(dungeon.ColorGrey + "█" + dungeon.ColorReset)
-			case dungeon.TileFloor:
-				fmt.Print(dungeon.ColorWhite + "░" + dungeon.ColorReset)
-			case dungeon.TileExit:
-				fmt.Print(dungeon.ColorYellow + ">" + dungeon.ColorReset)
-			case dungeon.TileHealth:
-				fmt.Print(dungeon.ColorMagenta + "+" + dungeon.ColorReset)
-			}
-		}
-		fmt.Println()
+	for _, client := range g.Clients {
+		client.Conn.Write(append(jsonState, '\n'))
 	}
-	fmt.Printf("\nHP: %d/%d | Monsters: %d | Use WASD/Arrows to move, Q/Esc to quit.\n", state.Player.HP, state.Player.MaxHP, len(state.Monsters))
-	for _, msg := range state.Log {
-		fmt.Println(msg)
+}
+
+func (c *Client) Listen() {
+	reader := bufio.NewReader(c.Conn)
+	for {
+		command, err := reader.ReadString('\n')
+		if err != nil {
+			if err == io.EOF {
+				log.Printf("Player %s connection closed.", c.PlayerID)
+			}
+			c.CmdChannel <- ClientCommand{PlayerID: c.PlayerID, Command: "quit"}
+			return
+		}
+		c.CmdChannel <- ClientCommand{PlayerID: c.PlayerID, Command: strings.TrimSpace(command)}
+	}
+}
+
+func (g *Game) RunLoop() {
+	for cmd := range g.CommandStream {
+		if cmd.Command == "quit" {
+			g.RemoveClient(cmd.PlayerID)
+		} else {
+			game.ProcessPlayerCommand(cmd.PlayerID, cmd.Command, &g.GameState)
+			game.UpdateMonsters(&g.GameState)
+		}
+
+		g.BroadcastState()
 	}
 }
 
 func main() {
-	dungeonMap, floorTiles, startPos, endPos := dungeon.GenerateDungeon(dungeon.MapWidth, dungeon.MapHeight)
-	monsters := game.SpawnMonsters(floorTiles)
-	player := game.NewPlayer(startPos)
+	game := NewGame()
+	go game.RunLoop()
 
-	gameState := game.GameState{
-		Dungeon:  dungeonMap,
-		Monsters: monsters,
-		Player:   player,
-		ExitPos:  endPos,
+	listener, err := net.Listen("tcp", ":8080")
+	if err != nil {
+		log.Fatalf("Failed to start server: %v", err)
 	}
-
-	if err := keyboard.Open(); err != nil {
-		log.Fatal(err)
-	}
-	defer keyboard.Close()
-
-	rand.Seed(time.Now().UnixNano())
-
-	addMessage(&gameState, "Welcome to the dungeon! Find the > to escape.")
+	defer listener.Close()
+	log.Println("Game server started on port 8080...")
 
 	for {
-		render(gameState)
-
-		char, key, err := keyboard.GetKey()
+		conn, err := listener.Accept()
 		if err != nil {
-			log.Fatal(err)
+			log.Printf("Failed to accept connection: %v", err)
+			continue
 		}
-
-		var attackedMonster *game.Monster
-		switch {
-		case char == 'w' || key == keyboard.KeyArrowUp:
-			attackedMonster = player.Move(0, -1, &gameState)
-		case char == 'a' || key == keyboard.KeyArrowLeft:
-			attackedMonster = player.Move(-1, 0, &gameState)
-		case char == 's' || key == keyboard.KeyArrowDown:
-			attackedMonster = player.Move(0, 1, &gameState)
-		case char == 'd' || key == keyboard.KeyArrowRight:
-			attackedMonster = player.Move(1, 0, &gameState)
-		case char == 'q' || key == keyboard.KeyEsc:
-			os.Exit(0)
-		}
-
-		if attackedMonster != nil {
-			damage := player.Attack
-			attackedMonster.CurrentHP -= damage
-			addMessage(&gameState, fmt.Sprintf("Player attacks the %s for %d damage!", attackedMonster.Template.Name, damage))
-
-			if attackedMonster.CurrentHP > 0 {
-				damage = attackedMonster.Template.Attack
-				player.HP -= damage
-				addMessage(&gameState, fmt.Sprintf("%s attacks Player for %d damage!", attackedMonster.Template.Name, damage))
-			} else {
-				addMessage(&gameState, fmt.Sprintf("%s is defeated!", attackedMonster.Template.Name))
-			}
-		}
-
-		var survivingMonsters []*game.Monster
-		for _, m := range gameState.Monsters {
-			if m.CurrentHP > 0 {
-				survivingMonsters = append(survivingMonsters, m)
-			}
-		}
-		gameState.Monsters = survivingMonsters
-
-		if player.HP <= 0 {
-			render(gameState)
-			fmt.Println("\n\nYou have been defeated. GAME OVER.")
-			keyboard.GetKey()
-			os.Exit(0)
-		}
-
-		if gameState.Dungeon[player.Position.Y][player.Position.X] == dungeon.TileHealth {
-			healAmount := 10
-			player.HP += healAmount
-			if player.HP > player.MaxHP {
-				player.HP = player.MaxHP
-			}
-			gameState.Dungeon[player.Position.Y][player.Position.X] = dungeon.TileFloor
-			addMessage(&gameState, fmt.Sprintf("You drink from the fountain and recover %d HP.", healAmount))
-		}
-
-		if player.Position == gameState.ExitPos {
-			render(gameState)
-			fmt.Println("\n\nYou have escaped the dungeon! VICTORY!")
-			keyboard.GetKey()
-			os.Exit(0)
-		}
-
-		for _, monster := range gameState.Monsters {
-			visionRadius := monster.Template.VisionRadius
-			leashRadius := monster.Template.LeashRadius
-			distToPlayer := game.Distance(monster.Position, player.Position)
-			distToSpawn := game.Distance(monster.Position, monster.SpawnPoint)
-
-			if distToPlayer == 1 {
-				damage := monster.Template.Attack
-				player.HP -= damage
-				addMessage(&gameState, fmt.Sprintf("%s attacks Player for %d damage!", monster.Template.Name, damage))
-				continue
-			}
-
-			if distToPlayer <= visionRadius && distToSpawn < leashRadius {
-				dx, dy := 0, 0
-				if player.Position.X > monster.Position.X {
-					dx = 1
-				} else if player.Position.X < monster.Position.X {
-					dx = -1
-				}
-				if player.Position.Y > monster.Position.Y {
-					dy = 1
-				} else if player.Position.Y < monster.Position.Y {
-					dy = -1
-				}
-				if rand.Intn(2) == 0 {
-					monster.Move(dx, 0, &gameState)
-				} else {
-					monster.Move(0, dy, &gameState)
-				}
-			} else if distToSpawn > 0 {
-				dx, dy := 0, 0
-				if monster.SpawnPoint.X > monster.Position.X {
-					dx = 1
-				} else if monster.SpawnPoint.X < monster.Position.X {
-					dx = -1
-				}
-				if monster.SpawnPoint.Y > monster.Position.Y {
-					dy = 1
-				} else if monster.SpawnPoint.Y < monster.Position.Y {
-					dy = -1
-				}
-				if rand.Intn(2) == 0 {
-					monster.Move(dx, 0, &gameState)
-				} else {
-					monster.Move(0, dy, &gameState)
-				}
-			} else {
-				direction := rand.Intn(4)
-				switch direction {
-				case 0:
-					monster.Move(0, -1, &gameState)
-				case 1:
-					monster.Move(0, 1, &gameState)
-				case 2:
-					monster.Move(-1, 0, &gameState)
-				case 3:
-					monster.Move(1, 0, &gameState)
-				}
-			}
-		}
+		go game.AddClient(conn)
 	}
 }

@@ -59,32 +59,28 @@ type Monster struct {
 
 func (m *Monster) Move(dx, dy int, state *GameState) {
 	newPos := dungeon.Point{X: m.Position.X + dx, Y: m.Position.Y + dy}
-
 	if newPos.X < 0 || newPos.X >= dungeon.MapWidth {
 		return
 	}
 	if newPos.Y < 0 || newPos.Y >= dungeon.MapHeight {
 		return
 	}
-
 	if state.Dungeon[newPos.Y][newPos.X] == dungeon.TileWall {
 		return
 	}
-
 	if newPos == state.ExitPos {
 		return
 	}
-
-	if newPos == state.Player.Position {
-		return
+	for _, p := range state.Players {
+		if newPos == p.Position {
+			return
+		}
 	}
-
 	for _, otherMonster := range state.Monsters {
 		if m != otherMonster && newPos == otherMonster.Position {
 			return
 		}
 	}
-
 	m.Position = newPos
 }
 
@@ -129,4 +125,81 @@ func SpawnMonsters(validSpawnPoints []dungeon.Point) []*Monster {
 		}
 	}
 	return monsters
+}
+
+func UpdateMonsters(state *GameState) {
+	for _, monster := range state.Monsters {
+		var closestPlayer *Player
+		minDist := -1
+
+		for _, player := range state.Players {
+			dist := Distance(monster.Position, player.Position)
+			if minDist == -1 || dist < minDist {
+				minDist = dist
+				closestPlayer = player
+			}
+		}
+
+		if closestPlayer == nil {
+			continue
+		}
+
+		distToPlayer := minDist
+		distToSpawn := Distance(monster.Position, monster.SpawnPoint)
+		visionRadius := monster.Template.VisionRadius
+		leashRadius := monster.Template.LeashRadius
+
+		if distToPlayer == 1 {
+			closestPlayer.HP -= monster.Template.Attack
+			continue
+		}
+
+		if distToPlayer <= visionRadius && distToSpawn < leashRadius {
+			dx, dy := 0, 0
+			if closestPlayer.Position.X > monster.Position.X {
+				dx = 1
+			} else if closestPlayer.Position.X < monster.Position.X {
+				dx = -1
+			}
+			if closestPlayer.Position.Y > monster.Position.Y {
+				dy = 1
+			} else if closestPlayer.Position.Y < monster.Position.Y {
+				dy = -1
+			}
+			if rand.Intn(2) == 0 {
+				monster.Move(dx, 0, state)
+			} else {
+				monster.Move(0, dy, state)
+			}
+		} else if distToSpawn > 0 {
+			dx, dy := 0, 0
+			if monster.SpawnPoint.X > monster.Position.X {
+				dx = 1
+			} else if monster.SpawnPoint.X < monster.Position.X {
+				dx = -1
+			}
+			if monster.SpawnPoint.Y > monster.Position.Y {
+				dy = 1
+			} else if monster.SpawnPoint.Y < monster.Position.Y {
+				dy = -1
+			}
+			if rand.Intn(2) == 0 {
+				monster.Move(dx, 0, state)
+			} else {
+				monster.Move(0, dy, state)
+			}
+		} else {
+			direction := rand.Intn(4)
+			switch direction {
+			case 0:
+				monster.Move(0, -1, state)
+			case 1:
+				monster.Move(0, 1, state)
+			case 2:
+				monster.Move(-1, 0, state)
+			case 3:
+				monster.Move(1, 0, state)
+			}
+		}
+	}
 }
