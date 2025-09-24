@@ -22,8 +22,8 @@ var Bestiary = map[string]MonsterTemplate{
 		Name:         "Goblin",
 		Rune:         'g',
 		Color:        dungeon.ColorGreen,
-		HP:           8,
-		Attack:       6,
+		HP:           5,
+		Attack:       1,
 		SpawnType:    "pack",
 		VisionRadius: 8,
 		LeashRadius:  12,
@@ -33,7 +33,7 @@ var Bestiary = map[string]MonsterTemplate{
 		Rune:         'O',
 		Color:        dungeon.ColorRed,
 		HP:           25,
-		Attack:       20,
+		Attack:       5,
 		SpawnType:    "single",
 		VisionRadius: 6,
 		LeashRadius:  20,
@@ -42,8 +42,8 @@ var Bestiary = map[string]MonsterTemplate{
 		Name:         "Skeleton Archer",
 		Rune:         's',
 		Color:        dungeon.ColorWhite,
-		HP:           15,
-		Attack:       12,
+		HP:           10,
+		Attack:       2,
 		SpawnType:    "single",
 		VisionRadius: 12,
 		LeashRadius:  10,
@@ -59,24 +59,29 @@ type Monster struct {
 
 func (m *Monster) Move(dx, dy int, state *GameState) {
 	newPos := dungeon.Point{X: m.Position.X + dx, Y: m.Position.Y + dy}
+
 	if newPos.X < 0 || newPos.X >= dungeon.MapWidth {
-		return 
+		return
 	}
 	if newPos.Y < 0 || newPos.Y >= dungeon.MapHeight {
-		return 
+		return
 	}
 
 	if state.Dungeon[newPos.Y][newPos.X] == dungeon.TileWall {
-		return 
+		return
+	}
+
+	if newPos == state.ExitPos {
+		return
 	}
 
 	if newPos == state.Player.Position {
-		return 
+		return
 	}
 
 	for _, otherMonster := range state.Monsters {
 		if m != otherMonster && newPos == otherMonster.Position {
-			return 
+			return
 		}
 	}
 

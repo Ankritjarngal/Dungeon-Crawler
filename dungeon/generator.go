@@ -1,7 +1,6 @@
 package dungeon
 
 import (
-
 	"math/rand"
 	"time"
 )
@@ -14,6 +13,7 @@ const (
 	TileWall  = 0
 	TileFloor = 1
 	TileExit  = 2
+	TileHealth =3 
 )
 
 const (
@@ -24,11 +24,12 @@ const (
 	ColorRed    = "\x1b[31m"
 	ColorCyan   = "\x1b[36m"
 	ColorReset  = "\x1b[0m"
+	ColorMagenta = "\x1b[95m"
 )
 
 type Point struct{ X, Y int }
 
-func GenerateDungeon(width, height int) ([][]int, []Point, Point) {
+func GenerateDungeon(width, height int) ([][]int, []Point, Point, Point) {
 	source := rand.NewSource(time.Now().UnixNano())
 	random := rand.New(source)
 
@@ -88,11 +89,12 @@ func GenerateDungeon(width, height int) ([][]int, []Point, Point) {
 		}
 	}
 
-	var startTile Point
+	var startTile, endTile Point
 	if len(floorTiles) > 1 {
 		exitIndex := random.Intn(len(floorTiles))
 		exitTile := floorTiles[exitIndex]
 		dungeon[exitTile.Y][exitTile.X] = TileExit
+		endTile = exitTile
 		floorTiles = append(floorTiles[:exitIndex], floorTiles[exitIndex+1:]...)
 
 		startIndex := random.Intn(len(floorTiles))
@@ -100,7 +102,19 @@ func GenerateDungeon(width, height int) ([][]int, []Point, Point) {
 		floorTiles = append(floorTiles[:startIndex], floorTiles[startIndex+1:]...)
 	}
 
-	return dungeon, floorTiles, startTile
+
+	numFountains := 3 
+	for i := 0; i < numFountains && len(floorTiles) > 0; i++ {
+		fountainIndex := random.Intn(len(floorTiles))
+		fountainTile := floorTiles[fountainIndex]
+
+		dungeon[fountainTile.Y][fountainTile.X] = TileHealth
+
+		floorTiles = append(floorTiles[:fountainIndex], floorTiles[fountainIndex+1:]...)
+	}
+
+	return dungeon, floorTiles, startTile, endTile
+
 }
 
 func carveCorridor(dungeon [][]int, p1, p2 Point) {
