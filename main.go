@@ -5,7 +5,6 @@ import (
 	"dunExpo/dungeon"
 	"dunExpo/game"
 	"encoding/json"
-	"io"
 	"log"
 	"net"
 	"strings"
@@ -82,8 +81,7 @@ func (g *Game) RemoveClient(playerID string) {
 	if client, ok := g.Clients[playerID]; ok {
 		client.Conn.Close()
 		delete(g.Clients, playerID)
-		delete(g.GameState.Players, playerID)
-		log.Printf("Player %s has been removed from the game.", playerID)
+		log.Printf("Player %s connection closed.", playerID)
 	}
 }
 
@@ -108,9 +106,6 @@ func (c *Client) Listen() {
 	for {
 		command, err := reader.ReadString('\n')
 		if err != nil {
-			if err == io.EOF {
-				log.Printf("Player %s connection closed.", c.PlayerID)
-			}
 			c.CmdChannel <- ClientCommand{PlayerID: c.PlayerID, Command: "quit"}
 			return
 		}
@@ -122,19 +117,23 @@ func (g *Game) RunLoop() {
 	for cmd := range g.CommandStream {
 		if cmd.Command == "quit" {
 			g.RemoveClient(cmd.PlayerID)
-		} else {
-			playersToRemoveFromPlayerTurn := game.ProcessPlayerCommand(cmd.PlayerID, cmd.Command, &g.GameState)
-			playersToRemoveFromMonsterTurn := game.UpdateMonsters(&g.GameState)
-
-			for id := range playersToRemoveFromPlayerTurn {
-				g.RemoveClient(id)
-			}
-			for id := range playersToRemoveFromMonsterTurn {
-				g.RemoveClient(id)
-			}
+			delete(g.GameState.Players, cmd.PlayerID)
+			g.BroadcastState()
+			continue
 		}
 
+		playersWhoWon := game.ProcessPlayerCommand(cmd.PlayerID, cmd.Command, &g.GameState)
+		game.UpdateMonsters(&g.GameState)
+
 		g.BroadcastState()
+
+		if len(playersWhoWon) > 0 {
+			time.Sleep(100 * time.Millisecond)
+			for id := range g.Clients {
+				g.RemoveClient(id)
+			}
+			return
+		}
 	}
 }
 
@@ -148,8 +147,6 @@ func main() {
 	}
 	defer listener.Close()
 	log.Println("Game server started on port 8080...")
-	log.Printf("It is currently %s in Srinagar.", time.Now().Format("3:04 PM"))
-
 
 	for {
 		conn, err := listener.Accept()

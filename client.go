@@ -39,10 +39,15 @@ func render(state game.GameState) {
 
 			if player, ok := playerMap[currentPoint]; ok {
 				runeToDraw := "@"
-				if player.ID != selfID {
+				colorToUse := dungeon.ColorCyan
+
+				if player.Status == "defeated" {
+					runeToDraw = "%"
+					colorToUse = dungeon.ColorGrey
+				} else if player.ID != selfID {
 					runeToDraw = "P"
 				}
-				fmt.Print(dungeon.ColorCyan + runeToDraw + dungeon.ColorReset)
+				fmt.Print(colorToUse + runeToDraw + dungeon.ColorReset)
 				continue
 			}
 

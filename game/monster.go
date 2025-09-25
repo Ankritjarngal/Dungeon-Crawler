@@ -128,15 +128,14 @@ func SpawnMonsters(validSpawnPoints []dungeon.Point) []*Monster {
 	return monsters
 }
 
-func UpdateMonsters(state *GameState) map[string]bool {
-	playersToRemove := make(map[string]bool)
+func UpdateMonsters(state *GameState) {
 	state.Log = []string{}
 	for _, monster := range state.Monsters {
 		var closestPlayer *Player
 		minDist := -1
 
 		for _, player := range state.Players {
-			if player.HP <= 0 {
+			if player.Status != "playing" {
 				continue
 			}
 			dist := Distance(monster.Position, player.Position)
@@ -158,10 +157,10 @@ func UpdateMonsters(state *GameState) map[string]bool {
 		if distToPlayer == 1 {
 			damage := monster.Template.Attack
 			closestPlayer.HP -= damage
-			state.AddMessage(fmt.Sprintf("%s attacks %s for %d damage!", monster.Template.Name, closestPlayer.ID, damage))
+			state.AddMessage(fmt.Sprintf("%s attacks %s for %d damage!", monster.Template.Name, closestPlayer.ID[0:4], damage))
 			if closestPlayer.HP <= 0 {
-				playersToRemove[closestPlayer.ID] = true
-				state.AddMessage(fmt.Sprintf("%s has been defeated by a %s!", closestPlayer.ID, monster.Template.Name))
+				closestPlayer.Status = "defeated"
+				state.AddMessage(fmt.Sprintf("%s has been defeated by a %s!", closestPlayer.ID[0:4], monster.Template.Name))
 			}
 			continue
 		}
@@ -214,5 +213,4 @@ func UpdateMonsters(state *GameState) map[string]bool {
 			}
 		}
 	}
-	return playersToRemove
 }

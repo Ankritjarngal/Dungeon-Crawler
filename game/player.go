@@ -11,6 +11,7 @@ type Player struct {
 	HP       int
 	MaxHP    int
 	Attack   int
+	Status   string
 }
 
 func NewPlayer(id string, startPos dungeon.Point) *Player {
@@ -20,6 +21,7 @@ func NewPlayer(id string, startPos dungeon.Point) *Player {
 		HP:       100,
 		MaxHP:    100,
 		Attack:   10,
+		Status:   "playing",
 	}
 }
 
@@ -62,7 +64,7 @@ func Distance(p1, p2 dungeon.Point) int {
 func ProcessPlayerCommand(playerID, command string, state *GameState) map[string]bool {
 	playersToRemove := make(map[string]bool)
 	player, ok := state.Players[playerID]
-	if !ok {
+	if !ok || player.Status != "playing" {
 		return playersToRemove
 	}
 
@@ -81,15 +83,15 @@ func ProcessPlayerCommand(playerID, command string, state *GameState) map[string
 	if attackedMonster != nil {
 		damage := player.Attack
 		attackedMonster.CurrentHP -= damage
-		state.AddMessage(fmt.Sprintf("%s attacks the %s for %d damage!", player.ID, attackedMonster.Template.Name, damage))
+		state.AddMessage(fmt.Sprintf("%s attacks the %s for %d damage!", player.ID[0:4], attackedMonster.Template.Name, damage))
 
 		if attackedMonster.CurrentHP > 0 {
 			damage = attackedMonster.Template.Attack
 			player.HP -= damage
-			state.AddMessage(fmt.Sprintf("%s attacks %s for %d damage!", attackedMonster.Template.Name, player.ID, damage))
+			state.AddMessage(fmt.Sprintf("%s attacks %s for %d damage!", attackedMonster.Template.Name, player.ID[0:4], damage))
 			if player.HP <= 0 {
-				playersToRemove[playerID] = true
-				state.AddMessage(fmt.Sprintf("%s has been defeated!", player.ID))
+				player.Status = "defeated"
+				state.AddMessage(fmt.Sprintf("%s has been defeated!", player.ID[0:4]))
 			}
 		} else {
 			state.AddMessage(fmt.Sprintf("%s is defeated!", attackedMonster.Template.Name))
@@ -104,7 +106,7 @@ func ProcessPlayerCommand(playerID, command string, state *GameState) map[string
 	}
 	state.Monsters = survivingMonsters
 
-	if p, ok := state.Players[playerID]; ok {
+	if p, ok := state.Players[playerID]; ok && p.Status == "playing" {
 		if state.Dungeon[p.Position.Y][p.Position.X] == dungeon.TileHealth {
 			healAmount := 10
 			p.HP += healAmount
@@ -112,12 +114,22 @@ func ProcessPlayerCommand(playerID, command string, state *GameState) map[string
 				p.HP = p.MaxHP
 			}
 			state.Dungeon[p.Position.Y][p.Position.X] = dungeon.TileFloor
-			state.AddMessage(fmt.Sprintf("%s drinks from the fountain and recovers %d HP.", p.ID, healAmount))
+			state.AddMessage(fmt.Sprintf("%s drinks from the fountain.", p.ID[0:4]))
 		}
 
 		if p.Position == state.ExitPos {
-			playersToRemove[playerID] = true
-			state.AddMessage(fmt.Sprintf("%s has escaped the dungeon! VICTORY!", p.ID))
+			state.AddMessage(fmt.Sprintf("%s has reached the exit! The party is victorious!", p.ID[0:4]))
+			for id := range state.Players {
+				playersToRemove[id] = true
+			}
+			return playersToRemove
+		}
+
+		distToExit := Distance(p.Position, state.ExitPos)
+		if distToExit <= 2 {
+			state.AddMessage("You see the exit shimmering nearby.")
+		} else if distToExit <= 5 {
+			state.AddMessage("You feel a draft from a nearby exit.")
 		}
 	}
 
