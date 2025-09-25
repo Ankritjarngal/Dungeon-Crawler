@@ -14,6 +14,11 @@ import (
 	"github.com/google/uuid"
 )
 
+type Server struct {
+	Sessions map[string]*Session
+	mux      sync.Mutex
+}
+
 type Client struct {
 	Conn       net.Conn
 	PlayerID   string
@@ -25,14 +30,14 @@ type ClientCommand struct {
 	Command  string
 }
 
-type Game struct {
+type Session struct {
 	GameState     game.GameState
 	Clients       map[string]*Client
 	mux           sync.Mutex
 	CommandStream chan ClientCommand
 }
 
-func NewGame() *Game {
+func NewSession() *Session {
 	dungeonMap, floorTiles, _, endPos := dungeon.GenerateDungeon(dungeon.MapWidth, dungeon.MapHeight)
 	monsters := game.SpawnMonsters(floorTiles)
 
@@ -43,60 +48,90 @@ func NewGame() *Game {
 		ExitPos:  endPos,
 	}
 
-	return &Game{
+	return &Session{
 		GameState:     gs,
 		Clients:       make(map[string]*Client),
 		CommandStream: make(chan ClientCommand),
 	}
 }
 
-func (g *Game) AddClient(conn net.Conn) {
-	g.mux.Lock()
-	defer g.mux.Unlock()
+func NewServer() *Server {
+	return &Server{
+		Sessions: make(map[string]*Session),
+	}
+}
+
+func (s *Server) AddClient(conn net.Conn) {
+	s.mux.Lock()
+	defer s.mux.Unlock()
+
+	for _, session := range s.Sessions {
+		if len(session.Clients) < 5 {
+			log.Printf("Player %s is joining an existing session.", conn.RemoteAddr())
+			session.AddClient(conn)
+			session.BroadcastState()
+			return
+		}
+	}
+
+	log.Printf("Creating a new session for player %s.", conn.RemoteAddr())
+	sessionID := uuid.New().String()[0:8]
+	newSession := NewSession()
+	s.Sessions[sessionID] = newSession
+
+	go newSession.RunLoop()
+	newSession.AddClient(conn)
+	newSession.BroadcastState()
+}
+
+func (s *Session) AddClient(conn net.Conn) {
+	s.mux.Lock()
+	defer s.mux.Unlock()
 
 	playerID := uuid.New().String()
-	startPos := g.GameState.GetRandomSpawnPoint()
+	startPos := s.GameState.GetRandomSpawnPoint()
 	newPlayer := game.NewPlayer(playerID, startPos)
-	g.GameState.Players[playerID] = newPlayer
+	s.GameState.Players[playerID] = newPlayer
 
 	client := &Client{
 		Conn:       conn,
 		PlayerID:   playerID,
-		CmdChannel: g.CommandStream,
+		CmdChannel: s.CommandStream,
 	}
-	g.Clients[playerID] = client
+	s.Clients[playerID] = client
 
 	welcomeMsg := map[string]string{"type": "welcome", "id": playerID}
 	jsonMsg, _ := json.Marshal(welcomeMsg)
 	client.Conn.Write(append(jsonMsg, '\n'))
 
-	log.Printf("Player %s (%s) has joined.", playerID, conn.RemoteAddr())
+	log.Printf("Player %s (%s) has joined session.", playerID, conn.RemoteAddr())
 	go client.Listen()
 }
 
-func (g *Game) RemoveClient(playerID string) {
-	g.mux.Lock()
-	defer g.mux.Unlock()
+func (s *Session) RemoveClient(playerID string) {
+	s.mux.Lock()
+	defer s.mux.Unlock()
 
-	if client, ok := g.Clients[playerID]; ok {
+	if client, ok := s.Clients[playerID]; ok {
 		client.Conn.Close()
-		delete(g.Clients, playerID)
-		log.Printf("Player %s connection closed.", playerID)
+		delete(s.Clients, playerID)
+		delete(s.GameState.Players, playerID)
+		log.Printf("Player %s has been removed from session.", playerID)
 	}
 }
 
-func (g *Game) BroadcastState() {
-	g.mux.Lock()
-	defer g.mux.Unlock()
+func (s *Session) BroadcastState() {
+	s.mux.Lock()
+	defer s.mux.Unlock()
 
-	stateMsg := map[string]interface{}{"type": "state", "data": g.GameState}
+	stateMsg := map[string]interface{}{"type": "state", "data": s.GameState}
 	jsonState, err := json.Marshal(stateMsg)
 	if err != nil {
 		log.Printf("Error marshalling game state: %v", err)
 		return
 	}
 
-	for _, client := range g.Clients {
+	for _, client := range s.Clients {
 		client.Conn.Write(append(jsonState, '\n'))
 	}
 }
@@ -113,33 +148,30 @@ func (c *Client) Listen() {
 	}
 }
 
-func (g *Game) RunLoop() {
-	for cmd := range g.CommandStream {
+func (s *Session) RunLoop() {
+	for cmd := range s.CommandStream {
 		if cmd.Command == "quit" {
-			g.RemoveClient(cmd.PlayerID)
-			delete(g.GameState.Players, cmd.PlayerID)
-			g.BroadcastState()
-			continue
-		}
-
-		playersWhoWon := game.ProcessPlayerCommand(cmd.PlayerID, cmd.Command, &g.GameState)
-		game.UpdateMonsters(&g.GameState)
-
-		g.BroadcastState()
-
-		if len(playersWhoWon) > 0 {
-			time.Sleep(100 * time.Millisecond)
-			for id := range g.Clients {
-				g.RemoveClient(id)
+			s.RemoveClient(cmd.PlayerID)
+		} else {
+			playersWhoWon := game.ProcessPlayerCommand(cmd.PlayerID, cmd.Command, &s.GameState)
+			game.UpdateMonsters(&s.GameState)
+			if len(playersWhoWon) > 0 {
+				s.BroadcastState()
+				time.Sleep(100 * time.Millisecond)
+				for id := range s.Clients {
+					s.RemoveClient(id)
+				}
+				// TODO: Need a way to remove this session from the main server map.
+				return
 			}
-			return
 		}
+
+		s.BroadcastState()
 	}
 }
 
 func main() {
-	game := NewGame()
-	go game.RunLoop()
+	server := NewServer()
 
 	listener, err := net.Listen("tcp", ":8080")
 	if err != nil {
@@ -154,6 +186,6 @@ func main() {
 			log.Printf("Failed to accept connection: %v", err)
 			continue
 		}
-		go game.AddClient(conn)
+		go server.AddClient(conn)
 	}
 }
