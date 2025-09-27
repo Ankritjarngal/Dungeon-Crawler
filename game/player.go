@@ -6,25 +6,25 @@ import (
 )
 
 type Player struct {
-	ID       string
-	Position dungeon.Point
-	HP       int
-	MaxHP    int
-	Attack   int
-	Status   string
-	Inventiory []*Item
+	ID             string
+	Position       dungeon.Point
+	HP             int
+	MaxHP          int
+	Attack         int
+	Status         string
+	Inventory      []*Item
 	EquippedWeapon *Item
 }
 
 func NewPlayer(id string, startPos dungeon.Point) *Player {
 	return &Player{
-		ID:       id,
-		Position: startPos,
-		HP:       100,
-		MaxHP:    100,
-		Attack:   10,
-		Status:   "playing",
-		Inventiory: []*Item{},
+		ID:             id,
+		Position:       startPos,
+		HP:             100,
+		MaxHP:          100,
+		Attack:         10,
+		Status:         "playing",
+		Inventory:      []*Item{},
 		EquippedWeapon: nil,
 	}
 }
@@ -82,10 +82,22 @@ func ProcessPlayerCommand(playerID, command string, state *GameState) map[string
 		attackedMonster = player.Move(0, 1, state)
 	case "d":
 		attackedMonster = player.Move(1, 0, state)
+	case "g":
+		if item, ok := state.ItemsOnGround[player.Position]; ok {
+			player.Inventory = append(player.Inventory, item)
+			if item.IsWeapon {
+				player.EquippedWeapon = item
+			}
+			delete(state.ItemsOnGround, player.Position)
+			state.AddMessage(fmt.Sprintf("%s picks up the %s.", player.ID[0:4], item.Name))
+		}
 	}
 
 	if attackedMonster != nil {
 		damage := player.Attack
+		if player.EquippedWeapon != nil {
+			damage = player.EquippedWeapon.Damage
+		}
 		attackedMonster.CurrentHP -= damage
 		state.AddMessage(fmt.Sprintf("%s attacks the %s for %d damage!", player.ID[0:4], attackedMonster.Template.Name, damage))
 

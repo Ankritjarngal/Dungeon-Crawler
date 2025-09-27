@@ -15,8 +15,13 @@ import (
 
 var selfID string
 
-func render(state game.GameState) {
+func render(state game.GameStateForJSON) {
 	fmt.Print("\033[H\033[2J")
+
+	itemMap := make(map[dungeon.Point]*game.Item)
+	for _, itemOnGround := range state.ItemsOnGround {
+		itemMap[itemOnGround.Position] = itemOnGround.Item
+	}
 
 	monsterMap := make(map[dungeon.Point]*game.Monster)
 	for _, m := range state.Monsters {
@@ -40,7 +45,6 @@ func render(state game.GameState) {
 			if player, ok := playerMap[currentPoint]; ok {
 				runeToDraw := "@"
 				colorToUse := dungeon.ColorCyan
-
 				if player.Status == "defeated" {
 					runeToDraw = "%"
 					colorToUse = dungeon.ColorGrey
@@ -48,6 +52,11 @@ func render(state game.GameState) {
 					runeToDraw = "P"
 				}
 				fmt.Print(colorToUse + runeToDraw + dungeon.ColorReset)
+				continue
+			}
+
+			if item, ok := itemMap[currentPoint]; ok {
+				fmt.Print(item.Color + string(item.Rune) + dungeon.ColorReset)
 				continue
 			}
 
@@ -70,7 +79,11 @@ func render(state game.GameState) {
 	}
 
 	if selfPlayer != nil {
-		fmt.Printf("\nHP: %d/%d | Monsters: %d | Players: %d | Use WASD/Arrows to move, Q/Esc to quit.\n", selfPlayer.HP, selfPlayer.MaxHP, len(state.Monsters), len(state.Players))
+		status := fmt.Sprintf("HP: %d/%d", selfPlayer.HP, selfPlayer.MaxHP)
+		if selfPlayer.EquippedWeapon != nil {
+			status += fmt.Sprintf(" | Weapon: %s (%d dmg)", selfPlayer.EquippedWeapon.Name, selfPlayer.EquippedWeapon.Damage)
+		}
+		fmt.Printf("\n%s | Monsters: %d | Players: %d\n", status, len(state.Monsters), len(state.Players))
 	} else {
 		fmt.Println("\nConnecting...")
 	}
@@ -116,7 +129,7 @@ func main() {
 				continue
 			}
 			if t, ok := msg["type"]; ok && string(t) == "\"state\"" {
-				var gameState game.GameState
+				var gameState game.GameStateForJSON
 				if err := json.Unmarshal(msg["data"], &gameState); err != nil {
 					log.Printf("Error unmarshalling game state: %v", err)
 					continue
@@ -146,6 +159,8 @@ func main() {
 			command = "s"
 		case char == 'd' || key == keyboard.KeyArrowRight:
 			command = "d"
+		case char == 'g':
+			command = "g"
 		case char == 'q' || key == keyboard.KeyEsc:
 			os.Exit(0)
 		}

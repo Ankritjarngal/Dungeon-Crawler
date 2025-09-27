@@ -5,13 +5,32 @@ import (
 	"math/rand"
 )
 
+// GameState is the internal, high-performance representation of the game world.
+// It uses a map for ItemsOnGround for fast lookups on the server.
 type GameState struct {
-	Dungeon  [][]int
-	Monsters []*Monster
-	Players  map[string]*Player
-	ExitPos  dungeon.Point
-	Log      []string
+	Dungeon       [][]int
+	Monsters      []*Monster
+	Players       map[string]*Player
+	ExitPos       dungeon.Point
+	Log           []string
 	ItemsOnGround map[dungeon.Point]*Item
+}
+
+// GameStateForJSON is a "shipping manifest" used only for sending data to the client.
+// It uses a slice for items because JSON keys must be strings.
+type GameStateForJSON struct {
+	Dungeon       [][]int
+	Monsters      []*Monster
+	Players       map[string]*Player
+	ExitPos       dungeon.Point
+	Log           []string
+	ItemsOnGround []ItemOnGroundJSON
+}
+
+// ItemOnGroundJSON represents a single item on the ground for sending.
+type ItemOnGroundJSON struct {
+	Position dungeon.Point
+	Item     *Item
 }
 
 func (gs *GameState) GetRandomSpawnPoint() dungeon.Point {
@@ -32,7 +51,6 @@ func (gs *GameState) GetRandomSpawnPoint() dungeon.Point {
 			}
 		}
 	}
-
 	if len(floorTiles) > 0 {
 		return floorTiles[rand.Intn(len(floorTiles))]
 	}

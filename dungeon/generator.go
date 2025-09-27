@@ -97,25 +97,21 @@ func GenerateDungeon(width, height int) ([][]int, []Point, Point, Point, map[Poi
 		fountainTile := floorTiles[fountainIndex]
 		dungeon[fountainTile.Y][fountainTile.X] = TileHealth
 		floorTiles = append(floorTiles[:fountainIndex], floorTiles[fountainIndex+1:]...)
-	
 	}
-	itemsToPlace:=make(map[Point]string)
+
+	itemsToPlace := make(map[Point]string)
 	itemsToSpawn := map[string]int{
 		"sword": 2,
 		"bow":   2,
 	}
-
 	for itemName, quantity := range itemsToSpawn {
 		for i := 0; i < quantity; i++ {
 			if len(floorTiles) == 0 {
-				break 
+				break
 			}
-
 			idx := random.Intn(len(floorTiles))
 			pos := floorTiles[idx]
-
 			itemsToPlace[pos] = itemName
-
 			floorTiles = append(floorTiles[:idx], floorTiles[idx+1:]...)
 		}
 	}
@@ -133,14 +129,12 @@ func carveCorridor(dungeon [][]int, p1, p2 Point) {
 		dungeon[y][x2] = TileFloor
 	}
 }
-
 func min(a, b int) int {
 	if a < b {
 		return a
 	}
 	return b
 }
-
 func max(a, b int) int {
 	if a > b {
 		return a

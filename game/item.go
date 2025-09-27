@@ -1,6 +1,7 @@
 package game
 
 import "dunExpo/dungeon"
+
 type Item struct {
 	Name      string
 	Rune      rune
@@ -10,15 +11,14 @@ type Item struct {
 	Range     int
 }
 
-
 var ItemTemplates = map[string]Item{
 	"sword": {
 		Name:     "Sword",
-		Rune:     '/', 
+		Rune:     '/',
 		Color:    dungeon.ColorWhite,
 		IsWeapon: true,
-		Damage:   15, 
-		Range:    1,  
+		Damage:   15,
+		Range:    1,
 	},
 	"bow": {
 		Name:     "Bow",
@@ -26,6 +26,6 @@ var ItemTemplates = map[string]Item{
 		Color:    dungeon.ColorWhite,
 		IsWeapon: true,
 		Damage:   7,
-		Range:    5, 
+		Range:    5,
 	},
 }
