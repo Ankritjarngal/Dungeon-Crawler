@@ -10,7 +10,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-
 	"github.com/google/uuid"
 )
 
@@ -119,6 +118,14 @@ func (s *Session) BroadcastState() {
 	s.mux.Lock()
 	defer s.mux.Unlock()
 
+	highlighted := []dungeon.Point{}
+	for _, p := range s.GameState.Players {
+		if p.Status == "targeting" && p.Target != nil {
+			highlighted = game.GetLineOfSightPath(p.Position, *p.Target)
+			break
+		}
+	}
+
 	itemsForJSON := []game.ItemOnGroundJSON{}
 	for pos, item := range s.GameState.ItemsOnGround {
 		itemsForJSON = append(itemsForJSON, game.ItemOnGroundJSON{
@@ -127,12 +134,13 @@ func (s *Session) BroadcastState() {
 		})
 	}
 	stateForJSON := game.GameStateForJSON{
-		Dungeon:       s.GameState.Dungeon,
-		Monsters:      s.GameState.Monsters,
-		Players:       s.GameState.Players,
-		ExitPos:       s.GameState.ExitPos,
-		Log:           s.GameState.Log,
-		ItemsOnGround: itemsForJSON,
+		Dungeon:          s.GameState.Dungeon,
+		Monsters:         s.GameState.Monsters,
+		Players:          s.GameState.Players,
+		ExitPos:          s.GameState.ExitPos,
+		Log:              s.GameState.Log,
+		ItemsOnGround:    itemsForJSON,
+		HighlightedTiles: highlighted,
 	}
 
 	stateMsg := map[string]interface{}{"type": "state", "data": stateForJSON}
@@ -145,7 +153,6 @@ func (s *Session) BroadcastState() {
 		client.Conn.Write(append(jsonState, '\n'))
 	}
 }
-
 func (c *Client) Listen() {
 	reader := bufio.NewReader(c.Conn)
 	for {

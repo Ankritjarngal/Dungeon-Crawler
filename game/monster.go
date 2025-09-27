@@ -16,6 +16,7 @@ type MonsterTemplate struct {
 	SpawnType    string
 	VisionRadius int
 	LeashRadius  int
+	AttackRange  int
 }
 
 var Bestiary = map[string]MonsterTemplate{
@@ -23,31 +24,34 @@ var Bestiary = map[string]MonsterTemplate{
 		Name:         "Goblin",
 		Rune:         'g',
 		Color:        dungeon.ColorGreen,
-		HP:           5,
-		Attack:       1,
+		HP:           8,
+		Attack:       2,
 		SpawnType:    "pack",
 		VisionRadius: 8,
 		LeashRadius:  12,
+		AttackRange:  1,
 	},
 	"ogre": {
 		Name:         "Ogre",
 		Rune:         'O',
 		Color:        dungeon.ColorRed,
-		HP:           25,
-		Attack:       5,
+		HP:           20,
+		Attack:       9,
 		SpawnType:    "single",
 		VisionRadius: 6,
 		LeashRadius:  20,
+		AttackRange:  1,
 	},
 	"skeleton_archer": {
 		Name:         "Skeleton Archer",
 		Rune:         's',
 		Color:        dungeon.ColorWhite,
-		HP:           10,
-		Attack:       2,
+		HP:           12,
+		Attack:       4,
 		SpawnType:    "single",
 		VisionRadius: 12,
 		LeashRadius:  10,
+		AttackRange:  8,
 	},
 }
 
@@ -149,11 +153,22 @@ func UpdateMonsters(state *GameState) {
 			continue
 		}
 
-		distToPlayer := minDist
-		distToSpawn := Distance(monster.Position, monster.SpawnPoint)
-		visionRadius := monster.Template.VisionRadius
-		leashRadius := monster.Template.LeashRadius
+		if monster.Template.Name == "Skeleton Archer" {
+			distToPlayer := Distance(monster.Position, closestPlayer.Position)
+			attackRange := monster.Template.AttackRange
+			if distToPlayer <= attackRange && LineOfSight(monster.Position, closestPlayer.Position, state.Dungeon) {
+				damage := monster.Template.Attack
+				closestPlayer.HP -= damage
+				state.AddMessage(fmt.Sprintf("%s fires an arrow at %s for %d damage!", monster.Template.Name, closestPlayer.ID[0:4], damage))
+				if closestPlayer.HP <= 0 {
+					closestPlayer.Status = "defeated"
+					state.AddMessage(fmt.Sprintf("%s has been defeated by a %s!", closestPlayer.ID[0:4], monster.Template.Name))
+				}
+				continue
+			}
+		}
 
+		distToPlayer := Distance(monster.Position, closestPlayer.Position)
 		if distToPlayer == 1 {
 			damage := monster.Template.Attack
 			closestPlayer.HP -= damage
@@ -165,6 +180,9 @@ func UpdateMonsters(state *GameState) {
 			continue
 		}
 
+		distToSpawn := Distance(monster.Position, monster.SpawnPoint)
+		visionRadius := monster.Template.VisionRadius
+		leashRadius := monster.Template.LeashRadius
 		if distToPlayer <= visionRadius && distToSpawn < leashRadius {
 			dx, dy := 0, 0
 			if closestPlayer.Position.X > monster.Position.X {

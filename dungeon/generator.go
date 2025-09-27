@@ -38,7 +38,7 @@ func GenerateDungeon(width, height int) ([][]int, []Point, Point, Point, map[Poi
 		}
 	}
 	numWalkers := 20
-	walkLength := 150
+	walkLength := 180
 	var walkerStartPoints []Point
 	for i := 0; i < numWalkers; i++ {
 		walkerX := random.Intn(width)
@@ -102,7 +102,7 @@ func GenerateDungeon(width, height int) ([][]int, []Point, Point, Point, map[Poi
 	itemsToPlace := make(map[Point]string)
 	itemsToSpawn := map[string]int{
 		"sword": 2,
-		"bow":   2,
+		"bow":   1,
 	}
 	for itemName, quantity := range itemsToSpawn {
 		for i := 0; i < quantity; i++ {

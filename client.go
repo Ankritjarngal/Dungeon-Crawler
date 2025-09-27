@@ -18,6 +18,11 @@ var selfID string
 func render(state game.GameStateForJSON) {
 	fmt.Print("\033[H\033[2J")
 
+	highlightMap := make(map[dungeon.Point]bool)
+	for _, p := range state.HighlightedTiles {
+		highlightMap[p] = true
+	}
+
 	itemMap := make(map[dungeon.Point]*game.Item)
 	for _, itemOnGround := range state.ItemsOnGround {
 		itemMap[itemOnGround.Position] = itemOnGround.Item
@@ -41,6 +46,11 @@ func render(state game.GameStateForJSON) {
 	for y := 0; y < len(state.Dungeon); y++ {
 		for x := 0; x < len(state.Dungeon[y]); x++ {
 			currentPoint := dungeon.Point{X: x, Y: y}
+
+			if highlightMap[currentPoint] {
+				fmt.Print(dungeon.ColorRed + "*" + dungeon.ColorReset)
+				continue
+			}
 
 			if player, ok := playerMap[currentPoint]; ok {
 				runeToDraw := "@"
@@ -81,7 +91,10 @@ func render(state game.GameStateForJSON) {
 	if selfPlayer != nil {
 		status := fmt.Sprintf("HP: %d/%d", selfPlayer.HP, selfPlayer.MaxHP)
 		if selfPlayer.EquippedWeapon != nil {
-			status += fmt.Sprintf(" | Weapon: %s (%d dmg)", selfPlayer.EquippedWeapon.Name, selfPlayer.EquippedWeapon.Damage)
+			status += fmt.Sprintf(" | Weapon: %s", selfPlayer.EquippedWeapon.Name)
+		}
+		if selfPlayer.Status == "targeting" {
+			status = "AIMING... (f to fire, any other key to cancel)"
 		}
 		fmt.Printf("\n%s | Monsters: %d | Players: %d\n", status, len(state.Monsters), len(state.Players))
 	} else {
@@ -161,8 +174,10 @@ func main() {
 			command = "d"
 		case char == 'g':
 			command = "g"
+		case char == 'f':
+			command = "f"
 		case char == 'q' || key == keyboard.KeyEsc:
-			os.Exit(0)
+			command = "quit_or_cancel" 
 		}
 		if command != "" {
 			fmt.Fprintf(conn, "%s\n", command)
