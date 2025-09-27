@@ -38,14 +38,20 @@ type Session struct {
 }
 
 func NewSession() *Session {
-	dungeonMap, floorTiles, _, endPos := dungeon.GenerateDungeon(dungeon.MapWidth, dungeon.MapHeight)
+	dungeonMap, floorTiles, _, endPos,itemLocations := dungeon.GenerateDungeon(dungeon.MapWidth, dungeon.MapHeight)
 	monsters := game.SpawnMonsters(floorTiles)
+	items:=make(map[dungeon.Point]*game.Item)
+	for pos, name := range itemLocations {
+		itemTemplate := game.ItemTemplates[name]
+		items[pos] = &itemTemplate
+	}
 
 	gs := game.GameState{
-		Dungeon:  dungeonMap,
-		Monsters: monsters,
-		Players:  make(map[string]*game.Player),
-		ExitPos:  endPos,
+		Dungeon:       dungeonMap,
+		Monsters:      monsters,
+		Players:       make(map[string]*game.Player),
+		ExitPos:       endPos,
+		ItemsOnGround: items, 
 	}
 
 	return &Session{

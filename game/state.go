@@ -11,6 +11,7 @@ type GameState struct {
 	Players  map[string]*Player
 	ExitPos  dungeon.Point
 	Log      []string
+	ItemsOnGround map[dungeon.Point]*Item
 }
 
 func (gs *GameState) GetRandomSpawnPoint() dungeon.Point {

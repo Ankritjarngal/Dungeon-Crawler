@@ -12,6 +12,8 @@ type Player struct {
 	MaxHP    int
 	Attack   int
 	Status   string
+	Inventiory []*Item
+	EquippedWeapon *Item
 }
 
 func NewPlayer(id string, startPos dungeon.Point) *Player {
@@ -22,6 +24,8 @@ func NewPlayer(id string, startPos dungeon.Point) *Player {
 		MaxHP:    100,
 		Attack:   10,
 		Status:   "playing",
+		Inventiory: []*Item{},
+		EquippedWeapon: nil,
 	}
 }
 

@@ -27,7 +27,7 @@ const (
 
 type Point struct{ X, Y int }
 
-func GenerateDungeon(width, height int) ([][]int, []Point, Point, Point) {
+func GenerateDungeon(width, height int) ([][]int, []Point, Point, Point, map[Point]string) {
 	source := rand.NewSource(time.Now().UnixNano())
 	random := rand.New(source)
 	dungeon := make([][]int, height)
@@ -97,8 +97,30 @@ func GenerateDungeon(width, height int) ([][]int, []Point, Point, Point) {
 		fountainTile := floorTiles[fountainIndex]
 		dungeon[fountainTile.Y][fountainTile.X] = TileHealth
 		floorTiles = append(floorTiles[:fountainIndex], floorTiles[fountainIndex+1:]...)
+	
 	}
-	return dungeon, floorTiles, startTile, endTile
+	itemsToPlace:=make(map[Point]string)
+	itemsToSpawn := map[string]int{
+		"sword": 2,
+		"bow":   2,
+	}
+
+	for itemName, quantity := range itemsToSpawn {
+		for i := 0; i < quantity; i++ {
+			if len(floorTiles) == 0 {
+				break 
+			}
+
+			idx := random.Intn(len(floorTiles))
+			pos := floorTiles[idx]
+
+			itemsToPlace[pos] = itemName
+
+			floorTiles = append(floorTiles[:idx], floorTiles[idx+1:]...)
+		}
+	}
+
+	return dungeon, floorTiles, startTile, endTile, itemsToPlace
 }
 
 func carveCorridor(dungeon [][]int, p1, p2 Point) {
