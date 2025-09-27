@@ -26,6 +26,6 @@ var ItemTemplates = map[string]Item{
 		Color:    dungeon.ColorWhite,
 		IsWeapon: true,
 		Damage:   7,
-		Range:    5,
+		Range:    9,
 	},
 }

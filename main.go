@@ -121,7 +121,7 @@ func (s *Session) BroadcastState() {
 	highlighted := []dungeon.Point{}
 	for _, p := range s.GameState.Players {
 		if p.Status == "targeting" && p.Target != nil {
-			highlighted = game.GetLineOfSightPath(p.Position, *p.Target)
+			highlighted = game.GetStraightLinePath(p.Position, *p.Target)
 			break
 		}
 	}
