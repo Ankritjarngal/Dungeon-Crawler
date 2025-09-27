@@ -66,13 +66,12 @@ func Distance(p1, p2 dungeon.Point) int {
 	return dx + dy
 }
 
-func ProcessPlayerCommand(playerID, command string, state *GameState) map[string]bool {
+func ProcessPlayerCommand(playerID, command string, state *GameState) (map[string]bool, bool) {
 	playersToRemove := make(map[string]bool)
 	player, ok := state.Players[playerID]
-	if !ok {
-		return playersToRemove
+	if !ok || (player.Status != "playing" && player.Status != "targeting") {
+		return playersToRemove, false
 	}
-
 	if player.Status == "targeting" {
 		switch command {
 		case "f":
@@ -86,71 +85,72 @@ func ProcessPlayerCommand(playerID, command string, state *GameState) map[string
 			}
 			player.Status = "playing"
 			player.Target = nil
+			return playersToRemove, false
 		default:
 			player.Status = "playing"
 			player.Target = nil
 			state.AddMessage("Targeting cancelled.")
+			return playersToRemove, true
 		}
-	} else if player.Status == "playing" {
-		var attackedMonster *Monster
-		var dx, dy int
-		moved := false
-		switch command {
-		case "w":
-			dx, dy, moved = 0, -1, true
-		case "a":
-			dx, dy, moved = -1, 0, true
-		case "s":
-			dx, dy, moved = 0, 1, true
-		case "d":
-			dx, dy, moved = 1, 0, true
-		case "g":
-			if item, ok := state.ItemsOnGround[player.Position]; ok {
-				player.Inventory = append(player.Inventory, item)
-				if item.IsWeapon {
-					player.EquippedWeapon = item
-				}
-				delete(state.ItemsOnGround, player.Position)
-				state.AddMessage(fmt.Sprintf("%s picks up the %s.", player.ID[0:4], item.Name))
-			}
-		case "f":
-			if player.EquippedWeapon != nil && player.EquippedWeapon.Name == "Bow" {
-				target := FindClosestVisibleMonster(state, player)
-				if target != nil {
-					player.Status = "targeting"
-					targetPos := target.Position
-					player.Target = &targetPos
-					state.AddMessage("Aiming... Press 'f' to fire or any other key to cancel.")
-				} else {
-					state.AddMessage("No valid targets in a straight line.")
-				}
-			} else {
-				state.AddMessage("You don't have a bow equipped!")
-			}
-		}
+	}
 
-		if moved {
-			attackedMonster = player.Move(dx, dy, state)
+	var attackedMonster *Monster
+	var dx, dy int
+	moved := false
+	switch command {
+	case "w":
+		dx, dy, moved = 0, -1, true
+	case "a":
+		dx, dy, moved = -1, 0, true
+	case "s":
+		dx, dy, moved = 0, 1, true
+	case "d":
+		dx, dy, moved = 1, 0, true
+	case "g":
+		if item, ok := state.ItemsOnGround[player.Position]; ok {
+			player.Inventory = append(player.Inventory, item)
+			if item.IsWeapon {
+				player.EquippedWeapon = item
+			}
+			delete(state.ItemsOnGround, player.Position)
+			state.AddMessage(fmt.Sprintf("%s picks up the %s.", player.ID[0:4], item.Name))
 		}
-
-		if attackedMonster != nil {
-			damage := player.Attack
-			if player.EquippedWeapon != nil {
-				damage = player.EquippedWeapon.Damage
-			}
-			attackedMonster.CurrentHP -= damage
-			state.AddMessage(fmt.Sprintf("%s attacks the %s for %d damage!", player.ID[0:4], attackedMonster.Template.Name, damage))
-			if attackedMonster.CurrentHP > 0 {
-				damage = attackedMonster.Template.Attack
-				player.HP -= damage
-				state.AddMessage(fmt.Sprintf("%s attacks %s for %d damage!", attackedMonster.Template.Name, player.ID[0:4], damage))
-				if player.HP <= 0 {
-					player.Status = "defeated"
-					state.AddMessage(fmt.Sprintf("%s has been defeated!", player.ID[0:4]))
-				}
+	case "f":
+		if player.EquippedWeapon != nil && player.EquippedWeapon.Name == "Bow" {
+			target := FindClosestVisibleMonster(state, player)
+			if target != nil {
+				player.Status = "targeting"
+				targetPos := target.Position
+				player.Target = &targetPos
+				state.AddMessage("Aiming... Press 'f' to fire or any other key to cancel.")
+				return playersToRemove, true
 			} else {
-				state.AddMessage(fmt.Sprintf("%s is defeated!", attackedMonster.Template.Name))
+				state.AddMessage("No valid targets in a straight line.")
 			}
+		} else {
+			state.AddMessage("You don't have a bow equipped!")
+		}
+	}
+	if moved {
+		attackedMonster = player.Move(dx, dy, state)
+	}
+	if attackedMonster != nil {
+		damage := player.Attack
+		if player.EquippedWeapon != nil {
+			damage = player.EquippedWeapon.Damage
+		}
+		attackedMonster.CurrentHP -= damage
+		state.AddMessage(fmt.Sprintf("%s attacks the %s for %d damage!", player.ID[0:4], attackedMonster.Template.Name, damage))
+		if attackedMonster.CurrentHP > 0 {
+			damage = attackedMonster.Template.Attack
+			player.HP -= damage
+			state.AddMessage(fmt.Sprintf("%s attacks %s for %d damage!", attackedMonster.Template.Name, player.ID[0:4], damage))
+			if player.HP <= 0 {
+				player.Status = "defeated"
+				state.AddMessage(fmt.Sprintf("%s has been defeated!", player.ID[0:4]))
+			}
+		} else {
+			state.AddMessage(fmt.Sprintf("%s is defeated!", attackedMonster.Template.Name))
 		}
 	}
 
@@ -161,7 +161,6 @@ func ProcessPlayerCommand(playerID, command string, state *GameState) map[string
 		}
 	}
 	state.Monsters = survivingMonsters
-
 	if p, ok := state.Players[playerID]; ok && p.Status == "playing" {
 		if state.Dungeon[p.Position.Y][p.Position.X] == dungeon.TileHealth {
 			healAmount := 10
@@ -177,7 +176,7 @@ func ProcessPlayerCommand(playerID, command string, state *GameState) map[string
 			for id := range state.Players {
 				playersToRemove[id] = true
 			}
-			return playersToRemove
+			return playersToRemove, false
 		}
 		distToExit := Distance(p.Position, state.ExitPos)
 		if distToExit <= 2 {
@@ -186,26 +185,43 @@ func ProcessPlayerCommand(playerID, command string, state *GameState) map[string
 			state.AddMessage("You feel a draft from a nearby exit.")
 		}
 	}
-	return playersToRemove
+	return playersToRemove, false
 }
 
-func GetStraightLinePath(p1, p2 dungeon.Point) []dungeon.Point {
+// These functions must be public (Capitalized) to be used by 'main'
+func GetLineOfSightPath(p1, p2 dungeon.Point) []dungeon.Point {
 	var path []dungeon.Point
 	x1, y1 := p1.X, p1.Y
 	x2, y2 := p2.X, p2.Y
-	if x1 == x2 {
-		if y1 > y2 {
-			y1, y2 = y2, y1
+	dx := x2 - x1
+	if dx < 0 {
+		dx = -dx
+	}
+	dy := y2 - y1
+	if dy < 0 {
+		dy = -dy
+	}
+	sx, sy := 1, 1
+	if x1 > x2 {
+		sx = -1
+	}
+	if y1 > y2 {
+		sy = -1
+	}
+	err := dx - dy
+	for {
+		path = append(path, dungeon.Point{X: x1, Y: y1})
+		if x1 == x2 && y1 == y2 {
+			break
 		}
-		for y := y1; y <= y2; y++ {
-			path = append(path, dungeon.Point{X: x1, Y: y})
+		e2 := 2 * err
+		if e2 > -dy {
+			err -= dy
+			x1 += sx
 		}
-	} else if y1 == y2 {
-		if x1 > x2 {
-			x1, x2 = x2, x1
-		}
-		for x := x1; x <= x2; x++ {
-			path = append(path, dungeon.Point{X: x, Y: y1})
+		if e2 < dx {
+			err += dx
+			y1 += sy
 		}
 	}
 	return path
@@ -258,4 +274,27 @@ func FindClosestVisibleMonster(state *GameState, p *Player) *Monster {
 		}
 	}
 	return target
+}
+
+// We also need GetStraightLinePath to be public now.
+func GetStraightLinePath(p1, p2 dungeon.Point) []dungeon.Point {
+	var path []dungeon.Point
+	x1, y1 := p1.X, p1.Y
+	x2, y2 := p2.X, p2.Y
+	if x1 == x2 {
+		if y1 > y2 {
+			y1, y2 = y2, y1
+		}
+		for y := y1; y <= y2; y++ {
+			path = append(path, dungeon.Point{X: x1, Y: y})
+		}
+	} else if y1 == y2 {
+		if x1 > x2 {
+			x1, x2 = x2, x1
+		}
+		for x := x1; x <= x2; x++ {
+			path = append(path, dungeon.Point{X: x, Y: y1})
+		}
+	}
+	return path
 }

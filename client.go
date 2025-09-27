@@ -1,16 +1,15 @@
 package main
 
 import (
-	"bufio"
 	"dunExpo/dungeon"
 	"dunExpo/game"
 	"encoding/json"
 	"fmt"
 	"log"
-	"net"
 	"os"
 
 	"github.com/eiannone/keyboard"
+	"github.com/gorilla/websocket"
 )
 
 var selfID string
@@ -18,10 +17,13 @@ var selfID string
 func render(state game.GameStateForJSON) {
 	fmt.Print("\033[H\033[2J")
 
+	// --- THE CRUCIAL FIX IS HERE ---
+	// 1. Create a fast lookup table (a map) for highlighted tiles.
 	highlightMap := make(map[dungeon.Point]bool)
 	for _, p := range state.HighlightedTiles {
 		highlightMap[p] = true
 	}
+	// --------------------------------
 
 	itemMap := make(map[dungeon.Point]*game.Item)
 	for _, itemOnGround := range state.ItemsOnGround {
@@ -47,6 +49,8 @@ func render(state game.GameStateForJSON) {
 		for x := 0; x < len(state.Dungeon[y]); x++ {
 			currentPoint := dungeon.Point{X: x, Y: y}
 
+			// 2. THE FIX: Check against the 'highlightMap', not the slice.
+			// This is a simple, correct, and fast boolean check.
 			if highlightMap[currentPoint] {
 				fmt.Print(dungeon.ColorRed + "*" + dungeon.ColorReset)
 				continue
@@ -107,40 +111,32 @@ func render(state game.GameStateForJSON) {
 }
 
 func main() {
-	conn, err := net.Dial("tcp", "localhost:8080")
+	conn, _, err := websocket.DefaultDialer.Dial("ws://localhost:8080/ws", nil)
 	if err != nil {
 		log.Fatalf("Failed to connect to server: %v", err)
 	}
 	defer conn.Close()
 
-	reader := bufio.NewReader(conn)
-
-	welcomeMsgBytes, err := reader.ReadBytes('\n')
-	if err != nil {
+	var welcomeMsg map[string]string
+	if err := conn.ReadJSON(&welcomeMsg); err != nil {
 		log.Fatalf("Did not receive welcome message: %v", err)
 	}
-
-	var welcomeMsg map[string]string
-	json.Unmarshal(welcomeMsgBytes, &welcomeMsg)
 	if welcomeMsg["type"] == "welcome" {
 		selfID = welcomeMsg["id"]
 	} else {
-		log.Fatalf("Expected welcome message, got: %s", string(welcomeMsgBytes))
+		log.Fatalf("Expected welcome message, got: %+v", welcomeMsg)
 	}
 
 	log.Printf("Connected to server. You are Player %s.", selfID)
 
 	go func() {
 		for {
-			jsonMsg, err := reader.ReadBytes('\n')
-			if err != nil {
+			var msg map[string]json.RawMessage
+			if err := conn.ReadJSON(&msg); err != nil {
 				log.Println("Server connection lost.")
 				os.Exit(0)
 			}
-			var msg map[string]json.RawMessage
-			if err := json.Unmarshal(jsonMsg, &msg); err != nil {
-				continue
-			}
+
 			if t, ok := msg["type"]; ok && string(t) == "\"state\"" {
 				var gameState game.GameStateForJSON
 				if err := json.Unmarshal(msg["data"], &gameState); err != nil {
@@ -177,10 +173,15 @@ func main() {
 		case char == 'f':
 			command = "f"
 		case char == 'q' || key == keyboard.KeyEsc:
-			command = "quit_or_cancel" 
+			command = "quit_or_cancel"
 		}
 		if command != "" {
-			fmt.Fprintf(conn, "%s\n", command)
+			if err := conn.WriteMessage(websocket.TextMessage, []byte(command)); err != nil {
+				log.Println("Failed to send command:", err)
+				return
+			}
 		}
 	}
 }
+
+

@@ -1,17 +1,22 @@
 package main
 
 import (
-	"bufio"
 	"dunExpo/dungeon"
 	"dunExpo/game"
-	"encoding/json"
 	"log"
-	"net"
-	"strings"
+	"net/http"
 	"sync"
 	"time"
+
 	"github.com/google/uuid"
+	"github.com/gorilla/websocket"
 )
+
+var upgrader = websocket.Upgrader{
+	ReadBufferSize:  1024,
+	WriteBufferSize: 1024,
+	CheckOrigin:     func(r *http.Request) bool { return true },
+}
 
 type Server struct {
 	Sessions map[string]*Session
@@ -19,7 +24,7 @@ type Server struct {
 }
 
 type Client struct {
-	Conn       net.Conn
+	Conn       *websocket.Conn
 	PlayerID   string
 	CmdChannel chan<- ClientCommand
 }
@@ -64,7 +69,16 @@ func NewServer() *Server {
 	}
 }
 
-func (s *Server) AddClient(conn net.Conn) {
+func (s *Server) handleWebSocketConnections(w http.ResponseWriter, r *http.Request) {
+	ws, err := upgrader.Upgrade(w, r, nil)
+	if err != nil {
+		log.Printf("websocket upgrade error: %v", err)
+		return
+	}
+	s.AddClient(ws)
+}
+
+func (s *Server) AddClient(conn *websocket.Conn) {
 	s.mux.Lock()
 	defer s.mux.Unlock()
 	for _, session := range s.Sessions {
@@ -84,7 +98,7 @@ func (s *Server) AddClient(conn net.Conn) {
 	newSession.BroadcastState()
 }
 
-func (s *Session) AddClient(conn net.Conn) {
+func (s *Session) AddClient(conn *websocket.Conn) {
 	s.mux.Lock()
 	defer s.mux.Unlock()
 	playerID := uuid.New().String()
@@ -98,8 +112,7 @@ func (s *Session) AddClient(conn net.Conn) {
 	}
 	s.Clients[playerID] = client
 	welcomeMsg := map[string]string{"type": "welcome", "id": playerID}
-	jsonMsg, _ := json.Marshal(welcomeMsg)
-	client.Conn.Write(append(jsonMsg, '\n'))
+	conn.WriteJSON(welcomeMsg)
 	log.Printf("Player %s (%s) has joined session.", playerID, conn.RemoteAddr())
 	go client.Listen()
 }
@@ -114,25 +127,26 @@ func (s *Session) RemoveClient(playerID string) {
 	}
 }
 
+
+
+
 func (s *Session) BroadcastState() {
 	s.mux.Lock()
 	defer s.mux.Unlock()
 
+	itemsForJSON := []game.ItemOnGroundJSON{}
+	for pos, item := range s.GameState.ItemsOnGround {
+		itemsForJSON = append(itemsForJSON, game.ItemOnGroundJSON{Position: pos, Item: item})
+	}
+
 	highlighted := []dungeon.Point{}
 	for _, p := range s.GameState.Players {
 		if p.Status == "targeting" && p.Target != nil {
-			highlighted = game.GetStraightLinePath(p.Position, *p.Target)
+			highlighted = game.GetLineOfSightPath(p.Position, *p.Target)
 			break
 		}
 	}
 
-	itemsForJSON := []game.ItemOnGroundJSON{}
-	for pos, item := range s.GameState.ItemsOnGround {
-		itemsForJSON = append(itemsForJSON, game.ItemOnGroundJSON{
-			Position: pos,
-			Item:     item,
-		})
-	}
 	stateForJSON := game.GameStateForJSON{
 		Dungeon:          s.GameState.Dungeon,
 		Monsters:         s.GameState.Monsters,
@@ -143,66 +157,63 @@ func (s *Session) BroadcastState() {
 		HighlightedTiles: highlighted,
 	}
 
+	// THE FIX: We create our final message...
 	stateMsg := map[string]interface{}{"type": "state", "data": stateForJSON}
-	jsonState, err := json.Marshal(stateMsg)
-	if err != nil {
-		log.Printf("Error marshalling game state: %v", err)
-		return
-	}
+
+	// ...and then we loop and send it using the correct helper function.
 	for _, client := range s.Clients {
-		client.Conn.Write(append(jsonState, '\n'))
-	}
-}
-func (c *Client) Listen() {
-	reader := bufio.NewReader(c.Conn)
-	for {
-		command, err := reader.ReadString('\n')
-		if err != nil {
-			c.CmdChannel <- ClientCommand{PlayerID: c.PlayerID, Command: "quit"}
-			return
+		if err := client.Conn.WriteJSON(stateMsg); err != nil {
+			log.Printf("broadcast error to %s: %v", client.PlayerID, err)
 		}
-		c.CmdChannel <- ClientCommand{PlayerID: c.PlayerID, Command: strings.TrimSpace(command)}
 	}
 }
+
+func (c *Client) Listen() {
+	defer func() {
+		c.CmdChannel <- ClientCommand{PlayerID: c.PlayerID, Command: "quit"}
+	}()
+	for {
+		_, p, err := c.Conn.ReadMessage()
+		if err != nil {
+			log.Printf("read error for %s: %v", c.PlayerID, err)
+			break
+		}
+		c.CmdChannel <- ClientCommand{PlayerID: c.PlayerID, Command: string(p)}
+	}
+}
+
 
 func (s *Session) RunLoop() {
 	for cmd := range s.CommandStream {
 		if cmd.Command == "quit" {
 			s.RemoveClient(cmd.PlayerID)
 			delete(s.GameState.Players, cmd.PlayerID)
-		} else {
-			playersWhoWon := game.ProcessPlayerCommand(cmd.PlayerID, cmd.Command, &s.GameState)
-			game.UpdateMonsters(&s.GameState)
-			if len(playersWhoWon) > 0 {
-				s.BroadcastState()
-				time.Sleep(100 * time.Millisecond)
-				for id := range s.Clients {
-					s.RemoveClient(id)
-				}
-				return
-			}
-		}
-		s.BroadcastState()
-	}
-}
-
-func main() {
-	server := NewServer()
-	listener, err := net.Listen("tcp", ":8080")
-	if err != nil {
-		log.Fatalf("Failed to start server: %v", err)
-	}
-	defer listener.Close()
-	log.Println("Game server started on port 8080...")
-	log.Printf("It is currently %s in Srinagar.", time.Now().Format("3:04 PM"))
-
-
-	for {
-		conn, err := listener.Accept()
-		if err != nil {
-			log.Printf("Failed to accept connection: %v", err)
+			s.BroadcastState()
 			continue
 		}
-		go server.AddClient(conn)
+
+		playersWhoWon, endTurnEarly := game.ProcessPlayerCommand(cmd.PlayerID, cmd.Command, &s.GameState)
+
+		if !endTurnEarly {
+			game.UpdateMonsters(&s.GameState)
+		}
+
+		s.BroadcastState()
+
+		if len(playersWhoWon) > 0 {
+			time.Sleep(100 * time.Millisecond)
+			for id := range s.Clients {
+				s.RemoveClient(id)
+			}
+			return
+		}
+	}
+}
+func main() {
+	server := NewServer()
+	http.HandleFunc("/ws", server.handleWebSocketConnections)
+	log.Println("Game server starting on ws://localhost:8080/ws")
+	if err := http.ListenAndServe(":8080", nil); err != nil {
+		log.Fatal("ListenAndServe:", err)
 	}
 }
