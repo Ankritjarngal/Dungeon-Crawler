@@ -4,4 +4,4 @@ A cooperative multiplayer game where you can explore randomly generated dungeons
 
 Current Progress:
 
-multiplayer mutlisession game done 
+multiplayer mutlisession game done adding more weapons and more deapth to this game 

@@ -122,7 +122,7 @@ func ProcessPlayerCommand(playerID, command string, state *GameState) map[string
 					player.Target = &targetPos
 					state.AddMessage("Aiming... Press 'f' to fire or any other key to cancel.")
 				} else {
-					state.AddMessage("No valid targets in range.")
+					state.AddMessage("No valid targets in a straight line.")
 				}
 			} else {
 				state.AddMessage("You don't have a bow equipped!")
@@ -189,46 +189,33 @@ func ProcessPlayerCommand(playerID, command string, state *GameState) map[string
 	return playersToRemove
 }
 
-func GetLineOfSightPath(p1, p2 dungeon.Point) []dungeon.Point {
+func GetStraightLinePath(p1, p2 dungeon.Point) []dungeon.Point {
 	var path []dungeon.Point
 	x1, y1 := p1.X, p1.Y
 	x2, y2 := p2.X, p2.Y
-	dx := x2 - x1
-	if dx < 0 {
-		dx = -dx
-	}
-	dy := y2 - y1
-	if dy < 0 {
-		dy = -dy
-	}
-	sx, sy := 1, 1
-	if x1 > x2 {
-		sx = -1
-	}
-	if y1 > y2 {
-		sy = -1
-	}
-	err := dx - dy
-	for {
-		path = append(path, dungeon.Point{X: x1, Y: y1})
-		if x1 == x2 && y1 == y2 {
-			break
+	if x1 == x2 {
+		if y1 > y2 {
+			y1, y2 = y2, y1
 		}
-		e2 := 2 * err
-		if e2 > -dy {
-			err -= dy
-			x1 += sx
+		for y := y1; y <= y2; y++ {
+			path = append(path, dungeon.Point{X: x1, Y: y})
 		}
-		if e2 < dx {
-			err += dx
-			y1 += sy
+	} else if y1 == y2 {
+		if x1 > x2 {
+			x1, x2 = x2, x1
+		}
+		for x := x1; x <= x2; x++ {
+			path = append(path, dungeon.Point{X: x, Y: y1})
 		}
 	}
 	return path
 }
 
 func LineOfSight(p1, p2 dungeon.Point, dungeonMap [][]int) bool {
-	path := GetLineOfSightPath(p1, p2)
+	path := GetStraightLinePath(p1, p2)
+	if len(path) == 0 {
+		return false
+	}
 	for i, p := range path {
 		if i == 0 || i == len(path)-1 {
 			continue
@@ -257,6 +244,9 @@ func FindClosestVisibleMonster(state *GameState, p *Player) *Monster {
 	minDist := -1
 	for _, m := range state.Monsters {
 		if m.CurrentHP <= 0 {
+			continue
+		}
+		if m.Position.X != p.Position.X && m.Position.Y != p.Position.Y {
 			continue
 		}
 		dist := Distance(p.Position, m.Position)
