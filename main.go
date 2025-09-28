@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"sync"
 	"time"
+	"os"
 
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
@@ -237,7 +238,14 @@ func main() {
 	http.HandleFunc("/ws", server.handleWebSocketConnections)
 
 	log.Println("Game server starting on http://localhost:8080")
-	if err := http.ListenAndServe(":8080", nil); err != nil {
-		log.Fatal("ListenAndServe:", err)
-	}
+	// You will need to add "os" to your imports at the top of main.go
+port := os.Getenv("PORT")
+if port == "" {
+    port = "8080" // Default for local running
+}
+
+log.Printf("Game server starting on port %s", port)
+if err := http.ListenAndServe(":"+port, nil); err != nil {
+    log.Fatal("ListenAndServe:", err)
+}
 }
