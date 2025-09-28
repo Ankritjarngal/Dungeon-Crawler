@@ -3,12 +3,14 @@ package game
 import "dunExpo/dungeon"
 
 type Item struct {
-	Name      string
-	Rune      rune
-	Color     string
-	IsWeapon  bool
-	Damage    int
-	Range     int
+	Name       string
+	Rune       rune
+	Color      string
+	IsWeapon   bool
+	IsArmor    bool
+	Damage     int
+	Range      int
+	Durability int
 }
 
 var ItemTemplates = map[string]Item{
@@ -26,6 +28,13 @@ var ItemTemplates = map[string]Item{
 		Color:    dungeon.ColorWhite,
 		IsWeapon: true,
 		Damage:   7,
-		Range:    9,
+		Range:    8,
+	},
+	"chainmail": {
+		Name:       "Chainmail",
+		Rune:       '#',
+		Color:      dungeon.ColorWhite,
+		IsArmor:    true,
+		Durability: 20,
 	},
 }

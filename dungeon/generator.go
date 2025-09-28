@@ -103,6 +103,7 @@ func GenerateDungeon(width, height int) ([][]int, []Point, Point, Point, map[Poi
 	itemsToSpawn := map[string]int{
 		"sword": 2,
 		"bow":   1,
+		"chainmail": 2,
 	}
 	for itemName, quantity := range itemsToSpawn {
 		for i := 0; i < quantity; i++ {

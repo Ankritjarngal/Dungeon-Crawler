@@ -24,8 +24,8 @@ var Bestiary = map[string]MonsterTemplate{
 		Name:         "Goblin",
 		Rune:         'g',
 		Color:        dungeon.ColorGreen,
-		HP:           8,
-		Attack:       2,
+		HP:           7,
+		Attack:       3,
 		SpawnType:    "pack",
 		VisionRadius: 8,
 		LeashRadius:  12,
@@ -35,8 +35,8 @@ var Bestiary = map[string]MonsterTemplate{
 		Name:         "Ogre",
 		Rune:         'O',
 		Color:        dungeon.ColorRed,
-		HP:           20,
-		Attack:       9,
+		HP:           25,
+		Attack:       10,
 		SpawnType:    "single",
 		VisionRadius: 6,
 		LeashRadius:  20,
@@ -46,12 +46,12 @@ var Bestiary = map[string]MonsterTemplate{
 		Name:         "Skeleton Archer",
 		Rune:         's',
 		Color:        dungeon.ColorWhite,
-		HP:           12,
-		Attack:       4,
+		HP:           15,
+		Attack:       6,
 		SpawnType:    "single",
 		VisionRadius: 12,
 		LeashRadius:  10,
-		AttackRange:  8,
+		AttackRange:  6,
 	},
 }
 
@@ -158,8 +158,17 @@ func UpdateMonsters(state *GameState) {
 			attackRange := monster.Template.AttackRange
 			if distToPlayer <= attackRange && LineOfSight(monster.Position, closestPlayer.Position, state.Dungeon) {
 				damage := monster.Template.Attack
-				closestPlayer.HP -= damage
-				state.AddMessage(fmt.Sprintf("%s fires an arrow at %s for %d damage!", monster.Template.Name, closestPlayer.ID[0:4], damage))
+				if closestPlayer.EquippedArmor != nil {
+					closestPlayer.EquippedArmor.Durability -= damage
+					state.AddMessage(fmt.Sprintf("%s's armor absorbs %d damage!", closestPlayer.ID[0:4], damage))
+					if closestPlayer.EquippedArmor.Durability <= 0 {
+						state.AddMessage(fmt.Sprintf("%s's %s breaks!", closestPlayer.ID[0:4], closestPlayer.EquippedArmor.Name))
+						closestPlayer.EquippedArmor = nil
+					}
+				} else {
+					closestPlayer.HP -= damage
+					state.AddMessage(fmt.Sprintf("%s fires an arrow at %s for %d damage!", monster.Template.Name, closestPlayer.ID[0:4], damage))
+				}
 				if closestPlayer.HP <= 0 {
 					closestPlayer.Status = "defeated"
 					state.AddMessage(fmt.Sprintf("%s has been defeated by a %s!", closestPlayer.ID[0:4], monster.Template.Name))
@@ -171,8 +180,17 @@ func UpdateMonsters(state *GameState) {
 		distToPlayer := Distance(monster.Position, closestPlayer.Position)
 		if distToPlayer == 1 {
 			damage := monster.Template.Attack
-			closestPlayer.HP -= damage
-			state.AddMessage(fmt.Sprintf("%s attacks %s for %d damage!", monster.Template.Name, closestPlayer.ID[0:4], damage))
+			if closestPlayer.EquippedArmor != nil {
+				closestPlayer.EquippedArmor.Durability -= damage
+				state.AddMessage(fmt.Sprintf("%s's armor absorbs %d damage!", closestPlayer.ID[0:4], damage))
+				if closestPlayer.EquippedArmor.Durability <= 0 {
+					state.AddMessage(fmt.Sprintf("%s's %s breaks!", closestPlayer.ID[0:4], closestPlayer.EquippedArmor.Name))
+					closestPlayer.EquippedArmor = nil
+				}
+			} else {
+				closestPlayer.HP -= damage
+				state.AddMessage(fmt.Sprintf("%s attacks %s for %d damage!", monster.Template.Name, closestPlayer.ID[0:4], damage))
+			}
 			if closestPlayer.HP <= 0 {
 				closestPlayer.Status = "defeated"
 				state.AddMessage(fmt.Sprintf("%s has been defeated by a %s!", closestPlayer.ID[0:4], monster.Template.Name))

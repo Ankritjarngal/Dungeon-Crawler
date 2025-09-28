@@ -14,6 +14,7 @@ type Player struct {
 	Status         string
 	Inventory      []*Item
 	EquippedWeapon *Item
+	EquippedArmor  *Item
 	Target         *dungeon.Point
 }
 
@@ -27,6 +28,7 @@ func NewPlayer(id string, startPos dungeon.Point) *Player {
 		Status:         "playing",
 		Inventory:      []*Item{},
 		EquippedWeapon: nil,
+		EquippedArmor:  nil,
 	}
 }
 
@@ -109,11 +111,39 @@ func ProcessPlayerCommand(playerID, command string, state *GameState) (map[strin
 	case "g":
 		if item, ok := state.ItemsOnGround[player.Position]; ok {
 			player.Inventory = append(player.Inventory, item)
-			if item.IsWeapon {
+			if item.IsWeapon && player.EquippedWeapon == nil {
 				player.EquippedWeapon = item
+			}
+			if item.IsArmor && player.EquippedArmor == nil {
+				player.EquippedArmor = item
 			}
 			delete(state.ItemsOnGround, player.Position)
 			state.AddMessage(fmt.Sprintf("%s picks up the %s.", player.ID[0:4], item.Name))
+		}
+	case "e":
+		var weaponsInInventory []*Item
+		for _, item := range player.Inventory {
+			if item.IsWeapon {
+				weaponsInInventory = append(weaponsInInventory, item)
+			}
+		}
+		if len(weaponsInInventory) > 0 {
+			if player.EquippedWeapon == nil {
+				player.EquippedWeapon = weaponsInInventory[0]
+			} else {
+				currentIndex := -1
+				for i, w := range weaponsInInventory {
+					if w == player.EquippedWeapon {
+						currentIndex = i
+						break
+					}
+				}
+				nextIndex := (currentIndex + 1) % len(weaponsInInventory)
+				player.EquippedWeapon = weaponsInInventory[nextIndex]
+			}
+			state.AddMessage(fmt.Sprintf("%s equips the %s.", player.ID[0:4], player.EquippedWeapon.Name))
+		} else {
+			state.AddMessage("No weapons in inventory to equip.")
 		}
 	case "f":
 		if player.EquippedWeapon != nil && player.EquippedWeapon.Name == "Bow" {
@@ -130,10 +160,35 @@ func ProcessPlayerCommand(playerID, command string, state *GameState) (map[strin
 		} else {
 			state.AddMessage("You don't have a bow equipped!")
 		}
+	case "D":
+		if player.EquippedWeapon != nil {
+			if _, ok := state.ItemsOnGround[player.Position]; !ok {
+				droppedItem := player.EquippedWeapon
+				state.ItemsOnGround[player.Position] = droppedItem
+				player.EquippedWeapon = nil
+				var newInventory []*Item
+				found := false
+				for _, item := range player.Inventory {
+					if !found && item == droppedItem {
+						found = true
+						continue
+					}
+					newInventory = append(newInventory, item)
+				}
+				player.Inventory = newInventory
+				state.AddMessage(fmt.Sprintf("%s drops the %s.", player.ID[0:4], droppedItem.Name))
+			} else {
+				state.AddMessage("You can't drop an item here.")
+			}
+		} else {
+			state.AddMessage("You have nothing equipped to drop.")
+		}
 	}
+
 	if moved {
 		attackedMonster = player.Move(dx, dy, state)
 	}
+
 	if attackedMonster != nil {
 		damage := player.Attack
 		if player.EquippedWeapon != nil {
@@ -143,8 +198,17 @@ func ProcessPlayerCommand(playerID, command string, state *GameState) (map[strin
 		state.AddMessage(fmt.Sprintf("%s attacks the %s for %d damage!", player.ID[0:4], attackedMonster.Template.Name, damage))
 		if attackedMonster.CurrentHP > 0 {
 			damage = attackedMonster.Template.Attack
-			player.HP -= damage
-			state.AddMessage(fmt.Sprintf("%s attacks %s for %d damage!", attackedMonster.Template.Name, player.ID[0:4], damage))
+			if player.EquippedArmor != nil {
+				player.EquippedArmor.Durability -= damage
+				state.AddMessage(fmt.Sprintf("%s's armor absorbs %d damage!", player.ID[0:4], damage))
+				if player.EquippedArmor.Durability <= 0 {
+					state.AddMessage(fmt.Sprintf("%s's %s breaks!", player.ID[0:4], player.EquippedArmor.Name))
+					player.EquippedArmor = nil
+				}
+			} else {
+				player.HP -= damage
+				state.AddMessage(fmt.Sprintf("%s attacks %s for %d damage!", attackedMonster.Template.Name, player.ID[0:4], damage))
+			}
 			if player.HP <= 0 {
 				player.Status = "defeated"
 				state.AddMessage(fmt.Sprintf("%s has been defeated!", player.ID[0:4]))
@@ -161,6 +225,7 @@ func ProcessPlayerCommand(playerID, command string, state *GameState) (map[strin
 		}
 	}
 	state.Monsters = survivingMonsters
+
 	if p, ok := state.Players[playerID]; ok && p.Status == "playing" {
 		if state.Dungeon[p.Position.Y][p.Position.X] == dungeon.TileHealth {
 			healAmount := 10
@@ -188,7 +253,6 @@ func ProcessPlayerCommand(playerID, command string, state *GameState) (map[strin
 	return playersToRemove, false
 }
 
-// These functions must be public (Capitalized) to be used by 'main'
 func GetLineOfSightPath(p1, p2 dungeon.Point) []dungeon.Point {
 	var path []dungeon.Point
 	x1, y1 := p1.X, p1.Y
@@ -276,7 +340,6 @@ func FindClosestVisibleMonster(state *GameState, p *Player) *Monster {
 	return target
 }
 
-// We also need GetStraightLinePath to be public now.
 func GetStraightLinePath(p1, p2 dungeon.Point) []dungeon.Point {
 	var path []dungeon.Point
 	x1, y1 := p1.X, p1.Y
