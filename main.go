@@ -15,32 +15,42 @@ import (
 var upgrader = websocket.Upgrader{
 	ReadBufferSize:  1024,
 	WriteBufferSize: 1024,
-	CheckOrigin:     func(r *http.Request) bool { return true },
+	CheckOrigin: func(r *http.Request) bool {
+		// Allow connections from the Vite React dev server.
+		// In a real production app, you would make this stricter.
+		return r.Header.Get("Origin") == "http://localhost:5173"
+	},
 }
 
+// Server is the top-level object that manages all game sessions.
 type Server struct {
 	Sessions map[string]*Session
 	mux      sync.Mutex
 }
 
+// Client represents a single connected player.
 type Client struct {
 	Conn       *websocket.Conn
 	PlayerID   string
 	CmdChannel chan<- ClientCommand
 }
 
+// ClientCommand is a message from a client to be processed by a session's game loop.
 type ClientCommand struct {
 	PlayerID string
 	Command  string
 }
 
+// Session manages a single, independent game world with up to 5 players.
 type Session struct {
 	GameState     game.GameState
 	Clients       map[string]*Client
 	mux           sync.Mutex
 	CommandStream chan ClientCommand
+	IsOver        bool
 }
 
+// NewSession creates a new, fully generated game world.
 func NewSession() *Session {
 	dungeonMap, floorTiles, _, endPos, itemLocations := dungeon.GenerateDungeon(dungeon.MapWidth, dungeon.MapHeight)
 	monsters := game.SpawnMonsters(floorTiles)
@@ -60,15 +70,18 @@ func NewSession() *Session {
 		GameState:     gs,
 		Clients:       make(map[string]*Client),
 		CommandStream: make(chan ClientCommand),
+		IsOver:        false,
 	}
 }
 
+// NewServer creates the main server instance.
 func NewServer() *Server {
 	return &Server{
 		Sessions: make(map[string]*Session),
 	}
 }
 
+// handleWebSocketConnections is the entry point for all new connections.
 func (s *Server) handleWebSocketConnections(w http.ResponseWriter, r *http.Request) {
 	ws, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
@@ -78,48 +91,59 @@ func (s *Server) handleWebSocketConnections(w http.ResponseWriter, r *http.Reque
 	s.AddClient(ws)
 }
 
+// AddClient is the server's "bouncer" logic. It finds a session or creates a new one.
 func (s *Server) AddClient(conn *websocket.Conn) {
 	s.mux.Lock()
 	defer s.mux.Unlock()
+
 	for _, session := range s.Sessions {
-		if len(session.Clients) < 5 {
+		if len(session.Clients) < 5 && !session.IsOver {
 			log.Printf("Player %s is joining an existing session.", conn.RemoteAddr())
 			session.AddClient(conn)
 			session.BroadcastState()
 			return
 		}
 	}
+
 	log.Printf("Creating a new session for player %s.", conn.RemoteAddr())
 	sessionID := uuid.New().String()[0:8]
 	newSession := NewSession()
 	s.Sessions[sessionID] = newSession
+
 	go newSession.RunLoop()
 	newSession.AddClient(conn)
 	newSession.BroadcastState()
 }
 
+// AddClient adds a player to a specific session.
 func (s *Session) AddClient(conn *websocket.Conn) {
 	s.mux.Lock()
 	defer s.mux.Unlock()
+
 	playerID := uuid.New().String()
 	startPos := s.GameState.GetRandomSpawnPoint()
 	newPlayer := game.NewPlayer(playerID, startPos)
 	s.GameState.Players[playerID] = newPlayer
+
 	client := &Client{
 		Conn:       conn,
 		PlayerID:   playerID,
 		CmdChannel: s.CommandStream,
 	}
 	s.Clients[playerID] = client
+
 	welcomeMsg := map[string]string{"type": "welcome", "id": playerID}
 	conn.WriteJSON(welcomeMsg)
+
 	log.Printf("Player %s (%s) has joined session.", playerID, conn.RemoteAddr())
 	go client.Listen()
 }
 
+// RemoveClient closes a player's connection and removes them from a session.
 func (s *Session) RemoveClient(playerID string) {
 	s.mux.Lock()
 	defer s.mux.Unlock()
+
 	if client, ok := s.Clients[playerID]; ok {
 		client.Conn.Close()
 		delete(s.Clients, playerID)
@@ -127,9 +151,7 @@ func (s *Session) RemoveClient(playerID string) {
 	}
 }
 
-
-
-
+// BroadcastState sends the current game state to all players in a session.
 func (s *Session) BroadcastState() {
 	s.mux.Lock()
 	defer s.mux.Unlock()
@@ -157,10 +179,7 @@ func (s *Session) BroadcastState() {
 		HighlightedTiles: highlighted,
 	}
 
-	// THE FIX: We create our final message...
 	stateMsg := map[string]interface{}{"type": "state", "data": stateForJSON}
-
-	// ...and then we loop and send it using the correct helper function.
 	for _, client := range s.Clients {
 		if err := client.Conn.WriteJSON(stateMsg); err != nil {
 			log.Printf("broadcast error to %s: %v", client.PlayerID, err)
@@ -168,6 +187,7 @@ func (s *Session) BroadcastState() {
 	}
 }
 
+// Listen reads commands from a client's connection and sends them to the game loop.
 func (c *Client) Listen() {
 	defer func() {
 		c.CmdChannel <- ClientCommand{PlayerID: c.PlayerID, Command: "quit"}
@@ -182,37 +202,41 @@ func (c *Client) Listen() {
 	}
 }
 
-
+// RunLoop is the turn-based game loop for a single session.
 func (s *Session) RunLoop() {
 	for cmd := range s.CommandStream {
 		if cmd.Command == "quit" {
 			s.RemoveClient(cmd.PlayerID)
 			delete(s.GameState.Players, cmd.PlayerID)
-			s.BroadcastState()
-			continue
-		}
-
-		playersWhoWon, endTurnEarly := game.ProcessPlayerCommand(cmd.PlayerID, cmd.Command, &s.GameState)
-
-		if !endTurnEarly {
-			game.UpdateMonsters(&s.GameState)
-		}
-
-		s.BroadcastState()
-
-		if len(playersWhoWon) > 0 {
-			time.Sleep(100 * time.Millisecond)
-			for id := range s.Clients {
-				s.RemoveClient(id)
+		} else {
+			playersWhoWon, endTurnEarly := game.ProcessPlayerCommand(cmd.PlayerID, cmd.Command, &s.GameState)
+			if !endTurnEarly {
+				game.UpdateMonsters(&s.GameState)
 			}
-			return
+			if len(playersWhoWon) > 0 {
+				s.mux.Lock()
+				s.IsOver = true
+				s.mux.Unlock()
+
+				s.BroadcastState()
+				time.Sleep(100 * time.Millisecond)
+				for id := range s.Clients {
+					s.RemoveClient(id)
+				}
+				return
+			}
 		}
+		s.BroadcastState()
 	}
 }
+
+// main is the entry point for the entire application.
 func main() {
 	server := NewServer()
+	http.Handle("/", http.FileServer(http.Dir("./static")))
 	http.HandleFunc("/ws", server.handleWebSocketConnections)
-	log.Println("Game server starting on ws://localhost:8080/ws")
+
+	log.Println("Game server starting on http://localhost:8080")
 	if err := http.ListenAndServe(":8080", nil); err != nil {
 		log.Fatal("ListenAndServe:", err)
 	}
