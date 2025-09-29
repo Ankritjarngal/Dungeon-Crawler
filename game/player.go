@@ -16,7 +16,7 @@ type Player struct {
 	EquippedWeapon *Item
 	EquippedArmor  *Item
 	Target         *dungeon.Point
-	VisionRadius   int 
+	VisionRadius   int
 }
 
 func NewPlayer(id string, startPos dungeon.Point) *Player {
@@ -30,7 +30,7 @@ func NewPlayer(id string, startPos dungeon.Point) *Player {
 		Inventory:      []*Item{},
 		EquippedWeapon: nil,
 		EquippedArmor:  nil,
-		VisionRadius: 6,
+		VisionRadius:   6,
 	}
 }
 
@@ -53,7 +53,6 @@ func (p *Player) Move(dx, dy int, state *GameState) *Monster {
 				return nil
 			}
 		}
-
 		p.Position = newPos
 	}
 	return nil
@@ -70,7 +69,6 @@ func Distance(p1, p2 dungeon.Point) int {
 	}
 	return dx + dy
 }
-// Replace the old CalculateVisibility function in your player.go file
 
 func CalculateVisibility(center dungeon.Point, radius int) map[dungeon.Point]bool {
 	visible := make(map[dungeon.Point]bool)
@@ -86,6 +84,7 @@ func CalculateVisibility(center dungeon.Point, radius int) map[dungeon.Point]boo
 	}
 	return visible
 }
+
 func ProcessPlayerCommand(playerID, command string, state *GameState) (map[string]bool, bool) {
 	playersToRemove := make(map[string]bool)
 	player, ok := state.Players[playerID]
@@ -127,16 +126,27 @@ func ProcessPlayerCommand(playerID, command string, state *GameState) (map[strin
 	case "d":
 		dx, dy, moved = 1, 0, true
 	case "g":
-		if item, ok := state.ItemsOnGround[player.Position]; ok {
-			player.Inventory = append(player.Inventory, item)
-			if item.IsWeapon && player.EquippedWeapon == nil {
-				player.EquippedWeapon = item
+		if itemOnGround, ok := state.ItemsOnGround[player.Position]; ok {
+			hasDuplicate := false
+			for _, existingItem := range player.Inventory {
+				if existingItem.Name == itemOnGround.Name {
+					hasDuplicate = true
+					break
+				}
 			}
-			if item.IsArmor && player.EquippedArmor == nil {
-				player.EquippedArmor = item
+			if hasDuplicate {
+				state.AddMessage(fmt.Sprintf("You already have a %s.", itemOnGround.Name))
+				return playersToRemove, false
+			}
+			player.Inventory = append(player.Inventory, itemOnGround)
+			if itemOnGround.IsWeapon && player.EquippedWeapon == nil {
+				player.EquippedWeapon = itemOnGround
+			}
+			if itemOnGround.IsArmor && player.EquippedArmor == nil {
+				player.EquippedArmor = itemOnGround
 			}
 			delete(state.ItemsOnGround, player.Position)
-			state.AddMessage(fmt.Sprintf("%s picks up the %s.", player.ID[0:4], item.Name))
+			state.AddMessage(fmt.Sprintf("%s picks up the %s.", player.ID[0:4], itemOnGround.Name))
 		}
 	case "e":
 		var weaponsInInventory []*Item
@@ -217,11 +227,19 @@ func ProcessPlayerCommand(playerID, command string, state *GameState) (map[strin
 		if attackedMonster.CurrentHP > 0 {
 			damage = attackedMonster.Template.Attack
 			if player.EquippedArmor != nil {
+				brokenArmor := player.EquippedArmor
 				player.EquippedArmor.Durability -= damage
 				state.AddMessage(fmt.Sprintf("%s's armor absorbs %d damage!", player.ID[0:4], damage))
 				if player.EquippedArmor.Durability <= 0 {
 					state.AddMessage(fmt.Sprintf("%s's %s breaks!", player.ID[0:4], player.EquippedArmor.Name))
 					player.EquippedArmor = nil
+					var newInventory []*Item
+					for _, item := range player.Inventory {
+						if item != brokenArmor {
+							newInventory = append(newInventory, item)
+						}
+					}
+					player.Inventory = newInventory
 				}
 			} else {
 				player.HP -= damage

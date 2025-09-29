@@ -159,11 +159,19 @@ func UpdateMonsters(state *GameState) {
 			if distToPlayer <= attackRange && LineOfSight(monster.Position, closestPlayer.Position, state.Dungeon) {
 				damage := monster.Template.Attack
 				if closestPlayer.EquippedArmor != nil {
+					brokenArmor := closestPlayer.EquippedArmor
 					closestPlayer.EquippedArmor.Durability -= damage
 					state.AddMessage(fmt.Sprintf("%s's armor absorbs %d damage!", closestPlayer.ID[0:4], damage))
 					if closestPlayer.EquippedArmor.Durability <= 0 {
 						state.AddMessage(fmt.Sprintf("%s's %s breaks!", closestPlayer.ID[0:4], closestPlayer.EquippedArmor.Name))
 						closestPlayer.EquippedArmor = nil
+						var newInventory []*Item
+						for _, item := range closestPlayer.Inventory {
+							if item != brokenArmor {
+								newInventory = append(newInventory, item)
+							}
+						}
+						closestPlayer.Inventory = newInventory
 					}
 				} else {
 					closestPlayer.HP -= damage
@@ -181,11 +189,19 @@ func UpdateMonsters(state *GameState) {
 		if distToPlayer == 1 {
 			damage := monster.Template.Attack
 			if closestPlayer.EquippedArmor != nil {
+				brokenArmor := closestPlayer.EquippedArmor
 				closestPlayer.EquippedArmor.Durability -= damage
 				state.AddMessage(fmt.Sprintf("%s's armor absorbs %d damage!", closestPlayer.ID[0:4], damage))
 				if closestPlayer.EquippedArmor.Durability <= 0 {
 					state.AddMessage(fmt.Sprintf("%s's %s breaks!", closestPlayer.ID[0:4], closestPlayer.EquippedArmor.Name))
 					closestPlayer.EquippedArmor = nil
+					var newInventory []*Item
+					for _, item := range closestPlayer.Inventory {
+						if item != brokenArmor {
+							newInventory = append(newInventory, item)
+						}
+					}
+					closestPlayer.Inventory = newInventory
 				}
 			} else {
 				closestPlayer.HP -= damage
