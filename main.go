@@ -3,8 +3,10 @@ package main
 import (
 	"dunExpo/dungeon"
 	"dunExpo/game"
+
 	"log"
 	"net/http"
+	"os"
 	"sync"
 	"time"
 
@@ -16,48 +18,55 @@ var upgrader = websocket.Upgrader{
 	ReadBufferSize:  1024,
 	WriteBufferSize: 1024,
 	CheckOrigin: func(r *http.Request) bool {
-		// Allow connections from the Vite React dev server.
-		// In a real production app, you would make this stricter.
-		return true 
+		// Allow connections from the Vite React dev server for local development.
+		// In production, the origin might be different or not present, so we are permissive.
+		origin := r.Header.Get("Origin")
+		if origin == "http://localhost:5173" {
+			return true
+		}
+		// Add other allowed origins here for production if needed.
+		// For now, let's be flexible.
+		if origin == "" {
+			return true
+		}
+		// A more secure check might be needed for a real production environment.
+		return true
 	},
 }
 
-// Server is the top-level object that manages all game sessions.
 type Server struct {
 	Sessions map[string]*Session
 	mux      sync.Mutex
 }
 
-// Client represents a single connected player.
 type Client struct {
 	Conn       *websocket.Conn
 	PlayerID   string
 	CmdChannel chan<- ClientCommand
 }
 
-// ClientCommand is a message from a client to be processed by a session's game loop.
 type ClientCommand struct {
 	PlayerID string
 	Command  string
 }
 
-// Session manages a single, independent game world with up to 5 players.
 type Session struct {
 	GameState     game.GameState
 	Clients       map[string]*Client
 	mux           sync.Mutex
 	CommandStream chan ClientCommand
 	IsOver        bool
+	ExploredTiles map[string]map[dungeon.Point]bool
 }
 
-// NewSession creates a new, fully generated game world.
 func NewSession() *Session {
 	dungeonMap, floorTiles, _, endPos, itemLocations := dungeon.GenerateDungeon(dungeon.MapWidth, dungeon.MapHeight)
 	monsters := game.SpawnMonsters(floorTiles)
 	items := make(map[dungeon.Point]*game.Item)
 	for pos, name := range itemLocations {
 		itemTemplate := game.ItemTemplates[name]
-		items[pos] = &itemTemplate
+		newItem := itemTemplate
+		items[pos] = &newItem
 	}
 	gs := game.GameState{
 		Dungeon:       dungeonMap,
@@ -71,17 +80,16 @@ func NewSession() *Session {
 		Clients:       make(map[string]*Client),
 		CommandStream: make(chan ClientCommand),
 		IsOver:        false,
+		ExploredTiles: make(map[string]map[dungeon.Point]bool),
 	}
 }
 
-// NewServer creates the main server instance.
 func NewServer() *Server {
 	return &Server{
 		Sessions: make(map[string]*Session),
 	}
 }
 
-// handleWebSocketConnections is the entry point for all new connections.
 func (s *Server) handleWebSocketConnections(w http.ResponseWriter, r *http.Request) {
 	ws, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
@@ -91,11 +99,9 @@ func (s *Server) handleWebSocketConnections(w http.ResponseWriter, r *http.Reque
 	s.AddClient(ws)
 }
 
-// AddClient is the server's "bouncer" logic. It finds a session or creates a new one.
 func (s *Server) AddClient(conn *websocket.Conn) {
 	s.mux.Lock()
 	defer s.mux.Unlock()
-
 	for _, session := range s.Sessions {
 		if len(session.Clients) < 5 && !session.IsOver {
 			log.Printf("Player %s is joining an existing session.", conn.RemoteAddr())
@@ -104,126 +110,101 @@ func (s *Server) AddClient(conn *websocket.Conn) {
 			return
 		}
 	}
-
 	log.Printf("Creating a new session for player %s.", conn.RemoteAddr())
 	sessionID := uuid.New().String()[0:8]
 	newSession := NewSession()
 	s.Sessions[sessionID] = newSession
-
 	go newSession.RunLoop()
 	newSession.AddClient(conn)
 	newSession.BroadcastState()
 }
 
-// AddClient adds a player to a specific session.
 func (s *Session) AddClient(conn *websocket.Conn) {
 	s.mux.Lock()
 	defer s.mux.Unlock()
-
 	playerID := uuid.New().String()
 	startPos := s.GameState.GetRandomSpawnPoint()
 	newPlayer := game.NewPlayer(playerID, startPos)
 	s.GameState.Players[playerID] = newPlayer
-
+	s.ExploredTiles[playerID] = make(map[dungeon.Point]bool)
 	client := &Client{
 		Conn:       conn,
 		PlayerID:   playerID,
 		CmdChannel: s.CommandStream,
 	}
 	s.Clients[playerID] = client
-
 	welcomeMsg := map[string]string{"type": "welcome", "id": playerID}
 	conn.WriteJSON(welcomeMsg)
-
 	log.Printf("Player %s (%s) has joined session.", playerID, conn.RemoteAddr())
 	go client.Listen()
 }
 
-// RemoveClient closes a player's connection and removes them from a session.
 func (s *Session) RemoveClient(playerID string) {
 	s.mux.Lock()
 	defer s.mux.Unlock()
-
 	if client, ok := s.Clients[playerID]; ok {
 		client.Conn.Close()
 		delete(s.Clients, playerID)
-		log.Printf("Player %s connection closed.", playerID)
+		delete(s.GameState.Players, playerID)
+		delete(s.ExploredTiles, playerID)
+		log.Printf("Player %s has been removed from session.", playerID)
 	}
 }
-
-// BroadcastState sends the current game state to all players in a session.
-// Replace the BroadcastState function in your main.go file
-
-// Replace the old BroadcastState function in your main.go file with this one.
 
 func (s *Session) BroadcastState() {
 	s.mux.Lock()
 	defer s.mux.Unlock()
 
-	// --- THE TEAMWORK BUFF LOGIC ---
-	teamworkRadius := 6 // How close players need to be to trigger the buff (matches base vision)
-	teamworkBonusPerAlly := 2  // How many extra tiles of vision they get
-
+	teamworkRadius := 6
+	teamworkBonusPerAlly := 2
 	allVisibleTiles := make(map[string]map[dungeon.Point]bool)
-
-	// Step 1: For each player, COUNT their nearby allies.
 	for playerID, player := range s.GameState.Players {
 		if player.Status != "playing" {
 			continue
 		}
-
 		nearbyAllyCount := 0
-		// Check this player against all OTHER players.
 		for otherPlayerID, otherPlayer := range s.GameState.Players {
 			if playerID != otherPlayerID && otherPlayer.Status == "playing" {
 				if game.Distance(player.Position, otherPlayer.Position) <= teamworkRadius {
-					// We found a nearby ally, so we increment the counter.
-					// We do NOT 'break' the loop; we continue counting.
 					nearbyAllyCount++
 				}
 			}
 		}
-
-		// Step 2: Calculate the final vision radius with the stacking bonus.
 		effectiveVision := player.VisionRadius + (nearbyAllyCount * teamworkBonusPerAlly)
-		
-		// Step 3: Calculate this player's visibility using their final, buffed radius.
 		allVisibleTiles[playerID] = game.CalculateVisibility(player.Position, effectiveVision)
 	}
-	// --- END OF BUFF LOGIC ---
 
+	for playerID := range s.GameState.Players {
+		if visible, ok := allVisibleTiles[playerID]; ok {
+			for point := range visible {
+				s.ExploredTiles[playerID][point] = true
+			}
+		}
+	}
 
-	// Loop through each connected client to send them their custom message.
 	for _, client := range s.Clients {
-		_, ok := s.GameState.Players[client.PlayerID]
-		if !ok { continue }
-
+		player, ok := s.GameState.Players[client.PlayerID]
+		if !ok {
+			continue
+		}
 		visibleTilesMap := allVisibleTiles[client.PlayerID]
-		// exploredTilesMap := s.ExploredTiles[client.PlayerID]
-		
-		// for point := range visibleTilesMap {
-		// 	exploredTilesMap[point] = true
-		// }
-		
+		exploredTilesMap := s.ExploredTiles[client.PlayerID]
 		visibleForJSON := []dungeon.Point{}
-		for p := range visibleTilesMap { visibleForJSON = append(visibleForJSON, p) }
-		
-		// exploredForJSON := []dungeon.Point{}
-		// for p := range exploredTilesMap { exploredForJSON = append(exploredForJSON, p) }
-
+		for p := range visibleTilesMap {
+			visibleForJSON = append(visibleForJSON, p)
+		}
+		exploredForJSON := []dungeon.Point{}
+		for p := range exploredTilesMap {
+			exploredForJSON = append(exploredForJSON, p)
+		}
 		itemsForJSON := []game.ItemOnGroundJSON{}
 		for pos, item := range s.GameState.ItemsOnGround {
 			itemsForJSON = append(itemsForJSON, game.ItemOnGroundJSON{Position: pos, Item: item})
 		}
-		
 		highlighted := []dungeon.Point{}
-		for _, p := range s.GameState.Players {
-			if p.Status == "targeting" && p.Target != nil {
-				highlighted = game.GetLineOfSightPath(p.Position, *p.Target)
-				break
-			}
+		if player.Status == "targeting" && player.Target != nil {
+			highlighted = game.GetLineOfSightPath(player.Position, *player.Target)
 		}
-
 		stateForJSON := game.GameStateForJSON{
 			Dungeon:          s.GameState.Dungeon,
 			Monsters:         s.GameState.Monsters,
@@ -233,16 +214,14 @@ func (s *Session) BroadcastState() {
 			ItemsOnGround:    itemsForJSON,
 			HighlightedTiles: highlighted,
 			VisibleTiles:     visibleForJSON,
-			// ExploredTiles:    exploredForJSON,
 		}
-
 		stateMsg := map[string]interface{}{"type": "state", "data": stateForJSON}
 		if err := client.Conn.WriteJSON(stateMsg); err != nil {
 			log.Printf("broadcast error to %s: %v", client.PlayerID, err)
 		}
 	}
 }
-// Listen reads commands from a client's connection and sends them to the game loop.
+
 func (c *Client) Listen() {
 	defer func() {
 		c.CmdChannel <- ClientCommand{PlayerID: c.PlayerID, Command: "quit"}
@@ -257,27 +236,24 @@ func (c *Client) Listen() {
 	}
 }
 
-// RunLoop is the turn-based game loop for a single session.
 func (s *Session) RunLoop() {
 	for cmd := range s.CommandStream {
 		if cmd.Command == "quit" {
 			s.RemoveClient(cmd.PlayerID)
-			delete(s.GameState.Players, cmd.PlayerID)
 		} else {
 			playersWhoWon, endTurnEarly := game.ProcessPlayerCommand(cmd.PlayerID, cmd.Command, &s.GameState)
 			if !endTurnEarly {
 				game.UpdateMonsters(&s.GameState)
 			}
 			if len(playersWhoWon) > 0 {
-				s.mux.Lock()
-				s.IsOver = true
-				s.mux.Unlock()
-
 				s.BroadcastState()
 				time.Sleep(100 * time.Millisecond)
 				for id := range s.Clients {
 					s.RemoveClient(id)
 				}
+				s.mux.Lock()
+				s.IsOver = true
+				s.mux.Unlock()
 				return
 			}
 		}
@@ -285,14 +261,16 @@ func (s *Session) RunLoop() {
 	}
 }
 
-// main is the entry point for the entire application.
 func main() {
 	server := NewServer()
 	http.Handle("/", http.FileServer(http.Dir("./static")))
 	http.HandleFunc("/ws", server.handleWebSocketConnections)
-
-	log.Println("Game server starting on http://localhost:8080")
-	if err := http.ListenAndServe(":8080", nil); err != nil {
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "8080"
+	}
+	log.Printf("Game server starting on port %s", port)
+	if err := http.ListenAndServe(":"+port, nil); err != nil {
 		log.Fatal("ListenAndServe:", err)
 	}
 }
