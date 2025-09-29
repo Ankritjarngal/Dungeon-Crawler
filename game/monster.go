@@ -17,6 +17,7 @@ type MonsterTemplate struct {
 	VisionRadius int
 	LeashRadius  int
 	AttackRange  int
+	MovingSpeed  int 
 }
 
 var Bestiary = map[string]MonsterTemplate{
@@ -30,6 +31,7 @@ var Bestiary = map[string]MonsterTemplate{
 		VisionRadius: 8,
 		LeashRadius:  12,
 		AttackRange:  1,
+		MovingSpeed:  2,
 	},
 	"ogre": {
 		Name:         "Ogre",
@@ -41,6 +43,7 @@ var Bestiary = map[string]MonsterTemplate{
 		VisionRadius: 6,
 		LeashRadius:  20,
 		AttackRange:  1,
+		MovingSpeed: 1,
 	},
 	"skeleton_archer": {
 		Name:         "Skeleton Archer",
@@ -52,7 +55,21 @@ var Bestiary = map[string]MonsterTemplate{
 		VisionRadius: 12,
 		LeashRadius:  10,
 		AttackRange:  6,
+		MovingSpeed: 1,
 	},
+	"bat":{
+		Name:         "Bat",
+		Rune:         'b',
+		Color:        dungeon.ColorMagenta,
+		HP:           3,
+		Attack:       2,
+		SpawnType:    "single",
+		VisionRadius: 5,
+		LeashRadius:  8,
+		AttackRange:  1,
+		MovingSpeed: 3,
+	},
+	
 }
 
 type Monster struct {
@@ -92,7 +109,7 @@ func (m *Monster) Move(dx, dy int, state *GameState) {
 func SpawnMonsters(validSpawnPoints []dungeon.Point) []*Monster {
 	source := rand.NewSource(time.Now().UnixNano())
 	random := rand.New(source)
-	totalMonstersToSpawn := 18
+	totalMonstersToSpawn := 20
 	var monsters []*Monster
 	var monsterKeys []string
 	for k := range Bestiary {
@@ -112,7 +129,7 @@ func SpawnMonsters(validSpawnPoints []dungeon.Point) []*Monster {
 		}
 		monsters = append(monsters, newMonster)
 		if template.SpawnType == "pack" && len(validSpawnPoints) > 2 {
-			for j := 0; j < 3; j++ {
+			for j := 0; j < 2; j++ {
 				if len(validSpawnPoints) == 0 {
 					break
 				}
@@ -131,13 +148,14 @@ func SpawnMonsters(validSpawnPoints []dungeon.Point) []*Monster {
 	}
 	return monsters
 }
-
 func UpdateMonsters(state *GameState) {
 	state.Log = []string{}
+
 	for _, monster := range state.Monsters {
 		var closestPlayer *Player
 		minDist := -1
 
+		// Find the closest player
 		for _, player := range state.Players {
 			if player.Status != "playing" {
 				continue
@@ -153,10 +171,12 @@ func UpdateMonsters(state *GameState) {
 			continue
 		}
 
+		// Skeleton Archer ranged attack
 		if monster.Template.Name == "Skeleton Archer" {
 			distToPlayer := Distance(monster.Position, closestPlayer.Position)
-			attackRange := monster.Template.AttackRange
-			if distToPlayer <= attackRange && LineOfSight(monster.Position, closestPlayer.Position, state.Dungeon) {
+			if distToPlayer <= monster.Template.AttackRange &&
+				LineOfSight(monster.Position, closestPlayer.Position, state.Dungeon) {
+
 				damage := monster.Template.Attack
 				if closestPlayer.EquippedArmor != nil {
 					brokenArmor := closestPlayer.EquippedArmor
@@ -185,8 +205,8 @@ func UpdateMonsters(state *GameState) {
 			}
 		}
 
-		distToPlayer := Distance(monster.Position, closestPlayer.Position)
-		if distToPlayer == 1 {
+		// Melee attack if adjacent
+		if Distance(monster.Position, closestPlayer.Position) == 1 {
 			damage := monster.Template.Attack
 			if closestPlayer.EquippedArmor != nil {
 				brokenArmor := closestPlayer.EquippedArmor
@@ -214,54 +234,40 @@ func UpdateMonsters(state *GameState) {
 			continue
 		}
 
-		distToSpawn := Distance(monster.Position, monster.SpawnPoint)
-		visionRadius := monster.Template.VisionRadius
-		leashRadius := monster.Template.LeashRadius
-		if distToPlayer <= visionRadius && distToSpawn < leashRadius {
+		// Determine target position: chase player if in vision, else return to spawn
+		target := monster.SpawnPoint
+		if Distance(monster.Position, closestPlayer.Position) <= monster.Template.VisionRadius &&
+			Distance(monster.Position, monster.SpawnPoint) < monster.Template.LeashRadius {
+			target = closestPlayer.Position
+		}
+
+		// Move towards target according to MovingSpeed
+		for step := 0; step < monster.Template.MovingSpeed; step++ {
 			dx, dy := 0, 0
-			if closestPlayer.Position.X > monster.Position.X {
+			if target.X > monster.Position.X {
 				dx = 1
-			} else if closestPlayer.Position.X < monster.Position.X {
+			} else if target.X < monster.Position.X {
 				dx = -1
 			}
-			if closestPlayer.Position.Y > monster.Position.Y {
+			if target.Y > monster.Position.Y {
 				dy = 1
-			} else if closestPlayer.Position.Y < monster.Position.Y {
+			} else if target.Y < monster.Position.Y {
 				dy = -1
 			}
-			if rand.Intn(2) == 0 {
-				monster.Move(dx, 0, state)
+
+			// Randomize X/Y movement like before
+			if dx != 0 && dy != 0 {
+				if rand.Intn(2) == 0 {
+					dy = 0
+				} else {
+					dx = 0
+				}
+			}
+
+			if dx != 0 || dy != 0 {
+				monster.Move(dx, dy, state)
 			} else {
-				monster.Move(0, dy, state)
-			}
-		} else if distToSpawn > 0 {
-			dx, dy := 0, 0
-			if monster.SpawnPoint.X > monster.Position.X {
-				dx = 1
-			} else if monster.SpawnPoint.X < monster.Position.X {
-				dx = -1
-			}
-			if monster.SpawnPoint.Y > monster.Position.Y {
-				dy = 1
-			} else if monster.SpawnPoint.Y < monster.Position.Y {
-				dy = -1
-			}
-			if rand.Intn(2) == 0 {
-				monster.Move(dx, 0, state)
-			} else {
-				monster.Move(0, dy, state)
-			}
-		} else {
-			direction := rand.Intn(4)
-			switch direction {
-			case 0:
-				monster.Move(0, -1, state)
-			case 1:
-				monster.Move(0, 1, state)
-			case 2:
-				monster.Move(-1, 0, state)
-			case 3:
-				monster.Move(1, 0, state)
+				break
 			}
 		}
 	}

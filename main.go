@@ -103,7 +103,7 @@ func (s *Server) AddClient(conn *websocket.Conn) {
 	s.mux.Lock()
 	defer s.mux.Unlock()
 	for _, session := range s.Sessions {
-		if len(session.Clients) < 5 && !session.IsOver {
+		if len(session.Clients) < 4 && !session.IsOver {
 			log.Printf("Player %s is joining an existing session.", conn.RemoteAddr())
 			session.AddClient(conn)
 			session.BroadcastState()
