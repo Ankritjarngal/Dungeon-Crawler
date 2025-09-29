@@ -36,7 +36,7 @@ var Bestiary = map[string]MonsterTemplate{
 		Rune:         'O',
 		Color:        dungeon.ColorRed,
 		HP:           25,
-		Attack:       10,
+		Attack:       8,
 		SpawnType:    "single",
 		VisionRadius: 6,
 		LeashRadius:  20,
@@ -92,7 +92,7 @@ func (m *Monster) Move(dx, dy int, state *GameState) {
 func SpawnMonsters(validSpawnPoints []dungeon.Point) []*Monster {
 	source := rand.NewSource(time.Now().UnixNano())
 	random := rand.New(source)
-	totalMonstersToSpawn := 0
+	totalMonstersToSpawn := 18
 	var monsters []*Monster
 	var monsterKeys []string
 	for k := range Bestiary {
