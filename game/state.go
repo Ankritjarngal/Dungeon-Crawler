@@ -26,6 +26,8 @@ type GameStateForJSON struct {
 	Log           []string
 	ItemsOnGround []ItemOnGroundJSON
 	HighlightedTiles []dungeon.Point 
+	VisibleTiles []dungeon.Point
+	PlayerTrails map[string][]dungeon.Point
 }
 
 // ItemOnGroundJSON represents a single item on the ground for sending.

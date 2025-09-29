@@ -16,6 +16,7 @@ type Player struct {
 	EquippedWeapon *Item
 	EquippedArmor  *Item
 	Target         *dungeon.Point
+	VisionRadius   int 
 }
 
 func NewPlayer(id string, startPos dungeon.Point) *Player {
@@ -29,6 +30,7 @@ func NewPlayer(id string, startPos dungeon.Point) *Player {
 		Inventory:      []*Item{},
 		EquippedWeapon: nil,
 		EquippedArmor:  nil,
+		VisionRadius: 6,
 	}
 }
 
@@ -51,6 +53,7 @@ func (p *Player) Move(dx, dy int, state *GameState) *Monster {
 				return nil
 			}
 		}
+
 		p.Position = newPos
 	}
 	return nil
@@ -67,7 +70,22 @@ func Distance(p1, p2 dungeon.Point) int {
 	}
 	return dx + dy
 }
+// Replace the old CalculateVisibility function in your player.go file
 
+func CalculateVisibility(center dungeon.Point, radius int) map[dungeon.Point]bool {
+	visible := make(map[dungeon.Point]bool)
+	for y := center.Y - radius; y <= center.Y + radius; y++ {
+		for x := center.X - radius; x <= center.X + radius; x++ {
+			if x < 0 || x >= dungeon.MapWidth || y < 0 || y >= dungeon.MapHeight {
+				continue
+			}
+			if Distance(center, dungeon.Point{X: x, Y: y}) <= radius {
+				visible[dungeon.Point{X: x, Y: y}] = true
+			}
+		}
+	}
+	return visible
+}
 func ProcessPlayerCommand(playerID, command string, state *GameState) (map[string]bool, bool) {
 	playersToRemove := make(map[string]bool)
 	player, ok := state.Players[playerID]

@@ -152,41 +152,96 @@ func (s *Session) RemoveClient(playerID string) {
 }
 
 // BroadcastState sends the current game state to all players in a session.
+// Replace the BroadcastState function in your main.go file
+
+// Replace the old BroadcastState function in your main.go file with this one.
+
 func (s *Session) BroadcastState() {
 	s.mux.Lock()
 	defer s.mux.Unlock()
 
-	itemsForJSON := []game.ItemOnGroundJSON{}
-	for pos, item := range s.GameState.ItemsOnGround {
-		itemsForJSON = append(itemsForJSON, game.ItemOnGroundJSON{Position: pos, Item: item})
-	}
+	// --- THE TEAMWORK BUFF LOGIC ---
+	teamworkRadius := 6 // How close players need to be to trigger the buff (matches base vision)
+	teamworkBonusPerAlly := 2  // How many extra tiles of vision they get
 
-	highlighted := []dungeon.Point{}
-	for _, p := range s.GameState.Players {
-		if p.Status == "targeting" && p.Target != nil {
-			highlighted = game.GetLineOfSightPath(p.Position, *p.Target)
-			break
+	allVisibleTiles := make(map[string]map[dungeon.Point]bool)
+
+	// Step 1: For each player, COUNT their nearby allies.
+	for playerID, player := range s.GameState.Players {
+		if player.Status != "playing" {
+			continue
 		}
-	}
 
-	stateForJSON := game.GameStateForJSON{
-		Dungeon:          s.GameState.Dungeon,
-		Monsters:         s.GameState.Monsters,
-		Players:          s.GameState.Players,
-		ExitPos:          s.GameState.ExitPos,
-		Log:              s.GameState.Log,
-		ItemsOnGround:    itemsForJSON,
-		HighlightedTiles: highlighted,
-	}
+		nearbyAllyCount := 0
+		// Check this player against all OTHER players.
+		for otherPlayerID, otherPlayer := range s.GameState.Players {
+			if playerID != otherPlayerID && otherPlayer.Status == "playing" {
+				if game.Distance(player.Position, otherPlayer.Position) <= teamworkRadius {
+					// We found a nearby ally, so we increment the counter.
+					// We do NOT 'break' the loop; we continue counting.
+					nearbyAllyCount++
+				}
+			}
+		}
 
-	stateMsg := map[string]interface{}{"type": "state", "data": stateForJSON}
+		// Step 2: Calculate the final vision radius with the stacking bonus.
+		effectiveVision := player.VisionRadius + (nearbyAllyCount * teamworkBonusPerAlly)
+		
+		// Step 3: Calculate this player's visibility using their final, buffed radius.
+		allVisibleTiles[playerID] = game.CalculateVisibility(player.Position, effectiveVision)
+	}
+	// --- END OF BUFF LOGIC ---
+
+
+	// Loop through each connected client to send them their custom message.
 	for _, client := range s.Clients {
+		_, ok := s.GameState.Players[client.PlayerID]
+		if !ok { continue }
+
+		visibleTilesMap := allVisibleTiles[client.PlayerID]
+		// exploredTilesMap := s.ExploredTiles[client.PlayerID]
+		
+		// for point := range visibleTilesMap {
+		// 	exploredTilesMap[point] = true
+		// }
+		
+		visibleForJSON := []dungeon.Point{}
+		for p := range visibleTilesMap { visibleForJSON = append(visibleForJSON, p) }
+		
+		// exploredForJSON := []dungeon.Point{}
+		// for p := range exploredTilesMap { exploredForJSON = append(exploredForJSON, p) }
+
+		itemsForJSON := []game.ItemOnGroundJSON{}
+		for pos, item := range s.GameState.ItemsOnGround {
+			itemsForJSON = append(itemsForJSON, game.ItemOnGroundJSON{Position: pos, Item: item})
+		}
+		
+		highlighted := []dungeon.Point{}
+		for _, p := range s.GameState.Players {
+			if p.Status == "targeting" && p.Target != nil {
+				highlighted = game.GetLineOfSightPath(p.Position, *p.Target)
+				break
+			}
+		}
+
+		stateForJSON := game.GameStateForJSON{
+			Dungeon:          s.GameState.Dungeon,
+			Monsters:         s.GameState.Monsters,
+			Players:          s.GameState.Players,
+			ExitPos:          s.GameState.ExitPos,
+			Log:              s.GameState.Log,
+			ItemsOnGround:    itemsForJSON,
+			HighlightedTiles: highlighted,
+			VisibleTiles:     visibleForJSON,
+			// ExploredTiles:    exploredForJSON,
+		}
+
+		stateMsg := map[string]interface{}{"type": "state", "data": stateForJSON}
 		if err := client.Conn.WriteJSON(stateMsg); err != nil {
 			log.Printf("broadcast error to %s: %v", client.PlayerID, err)
 		}
 	}
 }
-
 // Listen reads commands from a client's connection and sends them to the game loop.
 func (c *Client) Listen() {
 	defer func() {
