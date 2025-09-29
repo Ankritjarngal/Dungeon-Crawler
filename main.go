@@ -18,7 +18,7 @@ var upgrader = websocket.Upgrader{
 	CheckOrigin: func(r *http.Request) bool {
 		// Allow connections from the Vite React dev server.
 		// In a real production app, you would make this stricter.
-		return r.Header.Get("Origin") == "http://localhost:5173"
+		return true 
 	},
 }
 
