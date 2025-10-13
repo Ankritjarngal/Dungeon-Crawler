@@ -109,7 +109,7 @@ func (m *Monster) Move(dx, dy int, state *GameState) {
 func SpawnMonsters(validSpawnPoints []dungeon.Point) []*Monster {
 	source := rand.NewSource(time.Now().UnixNano())
 	random := rand.New(source)
-	totalMonstersToSpawn := 20
+	totalMonstersToSpawn := 22
 	var monsters []*Monster
 	var monsterKeys []string
 	for k := range Bestiary {

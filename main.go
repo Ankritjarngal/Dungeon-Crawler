@@ -35,6 +35,7 @@ type ServerResponse struct {
 	Message string `json:"message,omitempty"`
 	ID      string `json:"id,omitempty"`
 	Code    string `json:"code,omitempty"`
+	Result  string `json:"result,omitempty"`
 }
 
 type Server struct {
@@ -59,6 +60,21 @@ type Session struct {
 	cleanup       chan<- string
 }
 
+
+
+func (s *Session) BroadcastGameOver(result string) {
+	s.mux.Lock()
+	defer s.mux.Unlock()
+
+	gameOverMsg := ServerResponse{
+		Type:   "gameOver",
+		Result: result,
+	}
+
+	for _, client := range s.Clients {
+		client.Conn.WriteJSON(gameOverMsg)
+	}
+}
 func generateRoomCode() string {
 	const letters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
 	r := rand.New(rand.NewSource(time.Now().UnixNano()))
@@ -188,11 +204,14 @@ func (s *Session) AddClient(conn *websocket.Conn) {
 	s.BroadcastState()
 }
 
-func (s *Session) RemoveClient(playerID string) {
+func (s *Session) RemoveClient(playerID string, shouldCloseConn bool) {
 	s.mux.Lock()
 	defer s.mux.Unlock()
+
 	if client, ok := s.Clients[playerID]; ok {
-		client.Conn.Close()
+		if shouldCloseConn {
+			client.Conn.Close()
+		}
 		delete(s.Clients, playerID)
 		delete(s.GameState.Players, playerID)
 		log.Printf("Player %s removed from session %s.", playerID, s.Code)
@@ -275,14 +294,17 @@ func (c *Client) Listen(s *Session) {
 func (s *Session) RunLoop() {
 	defer func() {
 		log.Printf("Session %s RunLoop ended.", s.Code)
+		// Clean up any remaining connections when the loop exits.
+		for id := range s.Clients {
+			s.RemoveClient(id, true)
+		}
 		s.cleanup <- s.Code
 	}()
 
-	s.BroadcastState()
-
 	for cmd := range s.CommandStream {
 		if cmd.Command == "quit" {
-			s.RemoveClient(cmd.PlayerID)
+			s.RemoveClient(cmd.PlayerID, true) // A quit command should close the connection.
+			// If this was the last player, end the session.
 			if len(s.Clients) == 0 {
 				log.Printf("Session %s is empty, closing.", s.Code)
 				s.mux.Lock()
@@ -292,11 +314,10 @@ func (s *Session) RunLoop() {
 			}
 		} else {
 			playersWhoWon, endTurnEarly := game.ProcessPlayerCommand(cmd.PlayerID, cmd.Command, &s.GameState)
-			
 			if !endTurnEarly {
 				game.UpdateMonsters(&s.GameState)
 			}
-			
+
 			allPlayersDefeated := len(s.GameState.Players) > 0
 			for _, p := range s.GameState.Players {
 				if p.Status == "playing" || p.Status == "targeting" {
@@ -304,22 +325,32 @@ func (s *Session) RunLoop() {
 					break
 				}
 			}
+
+			// THE DEFINITIVE FIX:
 			if len(playersWhoWon) > 0 || allPlayersDefeated {
+				var result string
 				if allPlayersDefeated {
+					result = "defeat"
 					s.GameState.AddMessage("All players have been defeated! The dungeon claims its victims.")
+				} else {
+					result = "victory"
 				}
-				s.BroadcastState()
-				time.Sleep(200 * time.Millisecond)
+
+				s.BroadcastState() // Send final game state
+				time.Sleep(100 * time.Millisecond) // Give it a moment to send
+
+				s.BroadcastGameOver(result) // Send the final gameOver message
+				time.Sleep(100 * time.Millisecond) // Give it a moment to send
+
 				s.mux.Lock()
 				s.IsOver = true
 				s.mux.Unlock()
-				for id := range s.Clients {
-					s.RemoveClient(id)
-				}
+
+				// We NO LONGER close connections here. We simply end the loop.
+				log.Printf("Session %s has ended. The loop will now terminate.", s.Code)
 				return
 			}
 		}
-
 		s.BroadcastState()
 	}
 }
