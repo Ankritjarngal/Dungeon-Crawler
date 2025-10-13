@@ -267,7 +267,6 @@ func (c *Client) Listen(s *Session) {
 			log.Printf("[DEBUG] ReadMessage error for %s: %v", c.PlayerID[0:4], err)
 			break
 		}
-		log.Printf("[DEBUG] Received command from %s: %s", c.PlayerID[0:4], string(p))
 		s.CommandStream <- game.ClientCommand{PlayerID: c.PlayerID, Command: string(p)}
 	}
 }
