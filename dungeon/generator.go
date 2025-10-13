@@ -6,8 +6,8 @@ import (
 )
 
 const (
-	MapWidth   = 80
-	MapHeight  = 45
+	MapWidth   = 88
+	MapHeight  = 46
 	TileWall   = 0
 	TileFloor  = 1
 	TileExit   = 2
@@ -37,7 +37,7 @@ func GenerateDungeon(width, height int) ([][]int, []Point, Point, Point, map[Poi
 			dungeon[y][x] = TileWall
 		}
 	}
-	numWalkers := 20
+	numWalkers := 23
 	walkLength := 180
 	var walkerStartPoints []Point
 	for i := 0; i < numWalkers; i++ {
@@ -101,8 +101,8 @@ func GenerateDungeon(width, height int) ([][]int, []Point, Point, Point, map[Poi
 
 	itemsToPlace := make(map[Point]string)
 	itemsToSpawn := map[string]int{
-		"sword": 2,
-		"bow":   1,
+		"sword": 3,
+		"bow":   2,
 		"chainmail": 2,
 	}
 	for itemName, quantity := range itemsToSpawn {

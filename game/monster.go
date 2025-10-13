@@ -1,8 +1,8 @@
 package game
 
 import (
-	"dunExpo/dungeon"
 	"fmt"
+	"dunExpo/dungeon"
 	"math/rand"
 	"time"
 )
@@ -148,14 +148,20 @@ func SpawnMonsters(validSpawnPoints []dungeon.Point) []*Monster {
 	}
 	return monsters
 }
+
+
+// Replace the entire UpdateMonsters function in your monster.go file.
+
 func UpdateMonsters(state *GameState) {
-	state.Log = []string{}
+	state.Log = []string{} // Clear the log at the start of the monster turn
 
 	for _, monster := range state.Monsters {
+		// --- THE NEW "TARGETING SYSTEM" ---
+		// For each monster, it must find its own closest target.
 		var closestPlayer *Player
 		minDist := -1
 
-		// Find the closest player
+		// This loop is the monster's "eyes". It scans all active players.
 		for _, player := range state.Players {
 			if player.Status != "playing" {
 				continue
@@ -167,16 +173,18 @@ func UpdateMonsters(state *GameState) {
 			}
 		}
 
+		// If there are no active players left on the map, monsters do nothing.
 		if closestPlayer == nil {
 			continue
 		}
+		// --- END OF TARGETING SYSTEM ---
 
-		// Skeleton Archer ranged attack
+		// The rest of the AI now uses the 'closestPlayer' that this specific monster found.
+		
+		// Skeleton Archer ranged attack logic
 		if monster.Template.Name == "Skeleton Archer" {
 			distToPlayer := Distance(monster.Position, closestPlayer.Position)
-			if distToPlayer <= monster.Template.AttackRange &&
-				LineOfSight(monster.Position, closestPlayer.Position, state.Dungeon) {
-
+			if distToPlayer <= monster.Template.AttackRange && LineOfSight(monster.Position, closestPlayer.Position, state.Dungeon) {
 				damage := monster.Template.Attack
 				if closestPlayer.EquippedArmor != nil {
 					brokenArmor := closestPlayer.EquippedArmor
@@ -206,7 +214,8 @@ func UpdateMonsters(state *GameState) {
 		}
 
 		// Melee attack if adjacent
-		if Distance(monster.Position, closestPlayer.Position) == 1 {
+		distToPlayer := Distance(monster.Position, closestPlayer.Position)
+		if distToPlayer == 1 {
 			damage := monster.Template.Attack
 			if closestPlayer.EquippedArmor != nil {
 				brokenArmor := closestPlayer.EquippedArmor
@@ -234,40 +243,26 @@ func UpdateMonsters(state *GameState) {
 			continue
 		}
 
-		// Determine target position: chase player if in vision, else return to spawn
-		target := monster.SpawnPoint
-		if Distance(monster.Position, closestPlayer.Position) <= monster.Template.VisionRadius &&
-			Distance(monster.Position, monster.SpawnPoint) < monster.Template.LeashRadius {
-			target = closestPlayer.Position
-		}
-
-		// Move towards target according to MovingSpeed
-		for step := 0; step < monster.Template.MovingSpeed; step++ {
+		distToSpawn := Distance(monster.Position, monster.SpawnPoint)
+		visionRadius := monster.Template.VisionRadius
+		leashRadius := monster.Template.LeashRadius
+		if distToPlayer <= visionRadius && distToSpawn < leashRadius {
 			dx, dy := 0, 0
-			if target.X > monster.Position.X {
-				dx = 1
-			} else if target.X < monster.Position.X {
-				dx = -1
-			}
-			if target.Y > monster.Position.Y {
-				dy = 1
-			} else if target.Y < monster.Position.Y {
-				dy = -1
-			}
-
-			// Randomize X/Y movement like before
-			if dx != 0 && dy != 0 {
-				if rand.Intn(2) == 0 {
-					dy = 0
-				} else {
-					dx = 0
-				}
-			}
-
-			if dx != 0 || dy != 0 {
-				monster.Move(dx, dy, state)
-			} else {
-				break
+			if closestPlayer.Position.X > monster.Position.X { dx = 1 } else if closestPlayer.Position.X < monster.Position.X { dx = -1 }
+			if closestPlayer.Position.Y > monster.Position.Y { dy = 1 } else if closestPlayer.Position.Y < monster.Position.Y { dy = -1 }
+			if rand.Intn(2) == 0 { monster.Move(dx, 0, state) } else { monster.Move(0, dy, state) }
+		} else if distToSpawn > 0 {
+			dx, dy := 0, 0
+			if monster.SpawnPoint.X > monster.Position.X { dx = 1 } else if monster.SpawnPoint.X < monster.Position.X { dx = -1 }
+			if monster.SpawnPoint.Y > monster.Position.Y { dy = 1 } else if monster.SpawnPoint.Y < monster.Position.Y { dy = -1 }
+			if rand.Intn(2) == 0 { monster.Move(dx, 0, state) } else { monster.Move(0, dy, state) }
+		} else {
+			direction := rand.Intn(4)
+			switch direction {
+			case 0: monster.Move(0, -1, state); break
+			case 1: monster.Move(0, 1, state); break
+			case 2: monster.Move(-1, 0, state); break
+			case 3: monster.Move(1, 0, state); break
 			}
 		}
 	}

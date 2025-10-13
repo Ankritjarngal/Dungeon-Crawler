@@ -5,8 +5,10 @@ import (
 	"dunExpo/game"
 
 	"log"
+	"math/rand"
 	"net/http"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -18,48 +20,56 @@ var upgrader = websocket.Upgrader{
 	ReadBufferSize:  1024,
 	WriteBufferSize: 1024,
 	CheckOrigin: func(r *http.Request) bool {
-		// Allow connections from the Vite React dev server for local development.
-		// In production, the origin might be different or not present, so we are permissive.
 		origin := r.Header.Get("Origin")
-		if origin == "http://localhost:5173" {
-			return true
-		}
-		// Add other allowed origins here for production if needed.
-		// For now, let's be flexible.
-		if origin == "" {
-			return true
-		}
-		// A more secure check might be needed for a real production environment.
-		return true
+		return origin == "http://localhost:5173" || origin == ""
 	},
+}
+
+type InitialMessage struct {
+	Type string `json:"type"`
+	Code string `json:"code,omitempty"`
+}
+
+type ServerResponse struct {
+	Type    string `json:"type"`
+	Message string `json:"message,omitempty"`
+	ID      string `json:"id,omitempty"`
+	Code    string `json:"code,omitempty"`
 }
 
 type Server struct {
 	Sessions map[string]*Session
 	mux      sync.Mutex
+	cleanup  chan string
 }
 
 type Client struct {
 	Conn       *websocket.Conn
 	PlayerID   string
-	CmdChannel chan<- ClientCommand
-}
-
-type ClientCommand struct {
-	PlayerID string
-	Command  string
+	CmdChannel chan<- game.ClientCommand
 }
 
 type Session struct {
+	Code          string
 	GameState     game.GameState
 	Clients       map[string]*Client
 	mux           sync.Mutex
-	CommandStream chan ClientCommand
+	CommandStream chan game.ClientCommand
 	IsOver        bool
-	ExploredTiles map[string]map[dungeon.Point]bool
+	cleanup       chan<- string
 }
 
-func NewSession() *Session {
+func generateRoomCode() string {
+	const letters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+	r := rand.New(rand.NewSource(time.Now().UnixNano()))
+	b := make([]byte, 4)
+	for i := range b {
+		b[i] = letters[r.Intn(len(letters))]
+	}
+	return string(b)
+}
+
+func NewSession(code string, cleanup chan<- string) *Session {
 	dungeonMap, floorTiles, _, endPos, itemLocations := dungeon.GenerateDungeon(dungeon.MapWidth, dungeon.MapHeight)
 	monsters := game.SpawnMonsters(floorTiles)
 	items := make(map[dungeon.Point]*game.Item)
@@ -76,17 +86,28 @@ func NewSession() *Session {
 		ItemsOnGround: items,
 	}
 	return &Session{
+		Code:          code,
 		GameState:     gs,
 		Clients:       make(map[string]*Client),
-		CommandStream: make(chan ClientCommand),
+		CommandStream: make(chan game.ClientCommand, 100),
 		IsOver:        false,
-		ExploredTiles: make(map[string]map[dungeon.Point]bool),
+		cleanup:       cleanup,
 	}
 }
 
 func NewServer() *Server {
 	return &Server{
 		Sessions: make(map[string]*Session),
+		cleanup:  make(chan string, 10),
+	}
+}
+
+func (s *Server) RunCleanupLoop() {
+	for code := range s.cleanup {
+		s.mux.Lock()
+		delete(s.Sessions, code)
+		log.Printf("Cleaned up and removed session %s.", code)
+		s.mux.Unlock()
 	}
 }
 
@@ -96,47 +117,75 @@ func (s *Server) handleWebSocketConnections(w http.ResponseWriter, r *http.Reque
 		log.Printf("websocket upgrade error: %v", err)
 		return
 	}
-	s.AddClient(ws)
-}
 
-func (s *Server) AddClient(conn *websocket.Conn) {
+	var msg InitialMessage
+	if err := ws.ReadJSON(&msg); err != nil {
+		log.Printf("error reading initial message: %v", err)
+		ws.Close()
+		return
+	}
+
 	s.mux.Lock()
-	defer s.mux.Unlock()
-	for _, session := range s.Sessions {
-		if len(session.Clients) < 4 && !session.IsOver {
-			log.Printf("Player %s is joining an existing session.", conn.RemoteAddr())
-			session.AddClient(conn)
-			session.BroadcastState()
+	var session *Session
+	var ok bool
+
+	switch msg.Type {
+	case "create":
+		code := strings.ToUpper(msg.Code)
+		if _, exists := s.Sessions[code]; exists {
+			ws.WriteJSON(ServerResponse{Type: "error", Message: "Room code is already taken."})
+			s.mux.Unlock()
+			ws.Close()
 			return
 		}
+		session = NewSession(code, s.cleanup)
+		s.Sessions[code] = session
+		go session.RunLoop()
+		log.Printf("New session created with code: %s", code)
+	case "join":
+		code := strings.ToUpper(msg.Code)
+		session, ok = s.Sessions[code]
+		if !ok || session.IsOver {
+			ws.WriteJSON(ServerResponse{Type: "error", Message: "Room not found or has ended."})
+			s.mux.Unlock()
+			ws.Close()
+			return
+		}
+		if len(session.Clients) >= 5 {
+			ws.WriteJSON(ServerResponse{Type: "error", Message: "Room is full."})
+			s.mux.Unlock()
+			ws.Close()
+			return
+		}
+	default:
+		ws.WriteJSON(ServerResponse{Type: "error", Message: "Invalid request."})
+		s.mux.Unlock()
+		ws.Close()
+		return
 	}
-	log.Printf("Creating a new session for player %s.", conn.RemoteAddr())
-	sessionID := uuid.New().String()[0:8]
-	newSession := NewSession()
-	s.Sessions[sessionID] = newSession
-	go newSession.RunLoop()
-	newSession.AddClient(conn)
-	newSession.BroadcastState()
+	s.mux.Unlock()
+
+	session.AddClient(ws)
 }
 
 func (s *Session) AddClient(conn *websocket.Conn) {
-	s.mux.Lock()
-	defer s.mux.Unlock()
 	playerID := uuid.New().String()
+	s.mux.Lock()
 	startPos := s.GameState.GetRandomSpawnPoint()
 	newPlayer := game.NewPlayer(playerID, startPos)
 	s.GameState.Players[playerID] = newPlayer
-	s.ExploredTiles[playerID] = make(map[dungeon.Point]bool)
 	client := &Client{
 		Conn:       conn,
 		PlayerID:   playerID,
 		CmdChannel: s.CommandStream,
 	}
 	s.Clients[playerID] = client
-	welcomeMsg := map[string]string{"type": "welcome", "id": playerID}
-	conn.WriteJSON(welcomeMsg)
-	log.Printf("Player %s (%s) has joined session.", playerID, conn.RemoteAddr())
-	go client.Listen()
+	s.mux.Unlock()
+
+	conn.WriteJSON(ServerResponse{Type: "welcome", ID: playerID, Code: s.Code})
+	log.Printf("Player %s (%s) has joined session %s.", playerID, conn.RemoteAddr(), s.Code)
+	go client.Listen(s)
+	s.BroadcastState()
 }
 
 func (s *Session) RemoveClient(playerID string) {
@@ -146,8 +195,7 @@ func (s *Session) RemoveClient(playerID string) {
 		client.Conn.Close()
 		delete(s.Clients, playerID)
 		delete(s.GameState.Players, playerID)
-		delete(s.ExploredTiles, playerID)
-		log.Printf("Player %s has been removed from session.", playerID)
+		log.Printf("Player %s removed from session %s.", playerID, s.Code)
 	}
 }
 
@@ -155,56 +203,42 @@ func (s *Session) BroadcastState() {
 	s.mux.Lock()
 	defer s.mux.Unlock()
 
-	teamworkRadius := 6
-	teamworkBonusPerAlly := 2
-	allVisibleTiles := make(map[string]map[dungeon.Point]bool)
-	for playerID, player := range s.GameState.Players {
-		if player.Status != "playing" {
-			continue
-		}
-		nearbyAllyCount := 0
-		for otherPlayerID, otherPlayer := range s.GameState.Players {
-			if playerID != otherPlayerID && otherPlayer.Status == "playing" {
-				if game.Distance(player.Position, otherPlayer.Position) <= teamworkRadius {
-					nearbyAllyCount++
-				}
-			}
-		}
-		effectiveVision := player.VisionRadius + (nearbyAllyCount * teamworkBonusPerAlly)
-		allVisibleTiles[playerID] = game.CalculateVisibility(player.Position, effectiveVision)
-	}
-
-	for playerID := range s.GameState.Players {
-		if visible, ok := allVisibleTiles[playerID]; ok {
-			for point := range visible {
-				s.ExploredTiles[playerID][point] = true
-			}
-		}
-	}
-
 	for _, client := range s.Clients {
 		player, ok := s.GameState.Players[client.PlayerID]
 		if !ok {
 			continue
 		}
-		visibleTilesMap := allVisibleTiles[client.PlayerID]
-		exploredTilesMap := s.ExploredTiles[client.PlayerID]
+
+		teamworkRadius := 8
+		teamworkBonusPerAlly := 2
+		nearbyAllyCount := 0
+		if player.Status == "playing" {
+			for otherPlayerID, otherPlayer := range s.GameState.Players {
+				if player.ID != otherPlayerID && otherPlayer.Status == "playing" {
+					if game.Distance(player.Position, otherPlayer.Position) <= teamworkRadius {
+						nearbyAllyCount++
+					}
+				}
+			}
+		}
+		effectiveVision := player.VisionRadius + (nearbyAllyCount * teamworkBonusPerAlly)
+		visibleTilesMap := game.CalculateVisibility(player.Position, effectiveVision)
+		
 		visibleForJSON := []dungeon.Point{}
 		for p := range visibleTilesMap {
 			visibleForJSON = append(visibleForJSON, p)
 		}
-		exploredForJSON := []dungeon.Point{}
-		for p := range exploredTilesMap {
-			exploredForJSON = append(exploredForJSON, p)
-		}
+
 		itemsForJSON := []game.ItemOnGroundJSON{}
 		for pos, item := range s.GameState.ItemsOnGround {
 			itemsForJSON = append(itemsForJSON, game.ItemOnGroundJSON{Position: pos, Item: item})
 		}
+		
 		highlighted := []dungeon.Point{}
 		if player.Status == "targeting" && player.Target != nil {
 			highlighted = game.GetLineOfSightPath(player.Position, *player.Target)
 		}
+
 		stateForJSON := game.GameStateForJSON{
 			Dungeon:          s.GameState.Dungeon,
 			Monsters:         s.GameState.Monsters,
@@ -217,52 +251,83 @@ func (s *Session) BroadcastState() {
 		}
 		stateMsg := map[string]interface{}{"type": "state", "data": stateForJSON}
 		if err := client.Conn.WriteJSON(stateMsg); err != nil {
-			log.Printf("broadcast error to %s: %v", client.PlayerID, err)
+			log.Printf("[ERROR] broadcast error to %s: %v", client.PlayerID[0:4], err)
 		}
 	}
 }
 
-func (c *Client) Listen() {
+func (c *Client) Listen(s *Session) {
 	defer func() {
-		c.CmdChannel <- ClientCommand{PlayerID: c.PlayerID, Command: "quit"}
+		log.Printf("[DEBUG] Client %s Listen() ending, sending quit", c.PlayerID[0:4])
+		s.CommandStream <- game.ClientCommand{PlayerID: c.PlayerID, Command: "quit"}
 	}()
 	for {
 		_, p, err := c.Conn.ReadMessage()
 		if err != nil {
-			log.Printf("read error for %s: %v", c.PlayerID, err)
+			log.Printf("[DEBUG] ReadMessage error for %s: %v", c.PlayerID[0:4], err)
 			break
 		}
-		c.CmdChannel <- ClientCommand{PlayerID: c.PlayerID, Command: string(p)}
+		log.Printf("[DEBUG] Received command from %s: %s", c.PlayerID[0:4], string(p))
+		s.CommandStream <- game.ClientCommand{PlayerID: c.PlayerID, Command: string(p)}
 	}
 }
 
+
 func (s *Session) RunLoop() {
+	defer func() {
+		log.Printf("Session %s RunLoop ended.", s.Code)
+		s.cleanup <- s.Code
+	}()
+
+	s.BroadcastState()
+
 	for cmd := range s.CommandStream {
 		if cmd.Command == "quit" {
 			s.RemoveClient(cmd.PlayerID)
-		} else {
-			playersWhoWon, endTurnEarly := game.ProcessPlayerCommand(cmd.PlayerID, cmd.Command, &s.GameState)
-			if !endTurnEarly {
-				game.UpdateMonsters(&s.GameState)
-			}
-			if len(playersWhoWon) > 0 {
-				s.BroadcastState()
-				time.Sleep(100 * time.Millisecond)
-				for id := range s.Clients {
-					s.RemoveClient(id)
-				}
+			if len(s.Clients) == 0 {
+				log.Printf("Session %s is empty, closing.", s.Code)
 				s.mux.Lock()
 				s.IsOver = true
 				s.mux.Unlock()
 				return
 			}
+		} else {
+			playersWhoWon, endTurnEarly := game.ProcessPlayerCommand(cmd.PlayerID, cmd.Command, &s.GameState)
+			
+			if !endTurnEarly {
+				game.UpdateMonsters(&s.GameState)
+			}
+			
+			allPlayersDefeated := len(s.GameState.Players) > 0
+			for _, p := range s.GameState.Players {
+				if p.Status == "playing" || p.Status == "targeting" {
+					allPlayersDefeated = false
+					break
+				}
+			}
+			if len(playersWhoWon) > 0 || allPlayersDefeated {
+				if allPlayersDefeated {
+					s.GameState.AddMessage("All players have been defeated! The dungeon claims its victims.")
+				}
+				s.BroadcastState()
+				time.Sleep(200 * time.Millisecond)
+				s.mux.Lock()
+				s.IsOver = true
+				s.mux.Unlock()
+				for id := range s.Clients {
+					s.RemoveClient(id)
+				}
+				return
+			}
 		}
+
 		s.BroadcastState()
 	}
 }
 
 func main() {
 	server := NewServer()
+	go server.RunCleanupLoop()
 	http.Handle("/", http.FileServer(http.Dir("./static")))
 	http.HandleFunc("/ws", server.handleWebSocketConnections)
 	port := os.Getenv("PORT")
