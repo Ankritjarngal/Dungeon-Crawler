@@ -28,7 +28,7 @@ var ItemTemplates = map[string]Item{
 		Color:    dungeon.ColorWhite,
 		IsWeapon: true,
 		Damage:   7,
-		Range:    8,
+		Range:    6,
 	},
 	"chainmail": {
 		Name:       "Chainmail",
