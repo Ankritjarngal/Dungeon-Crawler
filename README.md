@@ -86,6 +86,8 @@ Built entirely in Go, the server acts as the authoritative Game Master, managing
 ![Gameplay Screenshot](./githubImages/Screenshot%20from%202025-10-14%2013-31-09.png)
 ![Gameplay Screenshot](./githubImages/image.png)
 ![Gameplay Screenshot](./githubImages/Screenshot%20from%202025-10-14%2013-30-04.png)
+![Gameplay Screenshot](./githubImages/image%20copy.png)
+
 
 ---
 
