@@ -160,6 +160,10 @@ func SpawnMonsters(validSpawnPoints []dungeon.Point , exitPos dungeon.Point ) []
 	for i := 0; i < totalMonstersToSpawn && len(validSpawnPoints) > 0; i++ {
 		randomKey := monsterKeys[random.Intn(len(monsterKeys))]
 		template := Bestiary[randomKey]
+		if template.SpawnType == "guardian" {
+			continue
+
+		}
 		randomIndex := random.Intn(len(validSpawnPoints))
 		spawnPoint := validSpawnPoints[randomIndex]
 		validSpawnPoints = append(validSpawnPoints[:randomIndex], validSpawnPoints[randomIndex+1:]...)
@@ -169,6 +173,7 @@ func SpawnMonsters(validSpawnPoints []dungeon.Point , exitPos dungeon.Point ) []
 			CurrentHP:  template.HP,
 			SpawnPoint: spawnPoint,
 		}
+		
 		monsters = append(monsters, newMonster)
 		if template.SpawnType == "pack" && len(validSpawnPoints) > 2 {
 			for j := 0; j < 2; j++ {
