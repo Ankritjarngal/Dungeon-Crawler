@@ -3,7 +3,6 @@ package main
 import (
 	"dunExpo/dungeon"
 	"dunExpo/game"
-
 	"log"
 	"math/rand"
 	"net/http"
@@ -15,21 +14,15 @@ import (
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 )
-var upgrader = websocket.Upgrader{
-    ReadBufferSize:  1024,
-    WriteBufferSize: 1024,
-    CheckOrigin: func(r *http.Request) bool {
-        origin := r.Header.Get("Origin")
-        if strings.HasPrefix(origin, "http://localhost") || origin == "" {
-            return true
-        }
-        if strings.HasPrefix(origin, "https://dungeon-explorer-kappa.vercel.app/") {
-            return true
-        }
-        return false
-    },
-}
 
+var upgrader = websocket.Upgrader{
+	ReadBufferSize:  1024,
+	WriteBufferSize: 1024,
+	CheckOrigin: func(r *http.Request) bool {
+
+		return true
+	},
+}
 
 type InitialMessage struct {
 	Type string `json:"type"`
@@ -66,17 +59,13 @@ type Session struct {
 	cleanup       chan<- string
 }
 
-
-
 func (s *Session) BroadcastGameOver(result string) {
 	s.mux.Lock()
 	defer s.mux.Unlock()
-
 	gameOverMsg := ServerResponse{
 		Type:   "gameOver",
 		Result: result,
 	}
-
 	for _, client := range s.Clients {
 		client.Conn.WriteJSON(gameOverMsg)
 	}
@@ -139,18 +128,15 @@ func (s *Server) handleWebSocketConnections(w http.ResponseWriter, r *http.Reque
 		log.Printf("websocket upgrade error: %v", err)
 		return
 	}
-
 	var msg InitialMessage
 	if err := ws.ReadJSON(&msg); err != nil {
 		log.Printf("error reading initial message: %v", err)
 		ws.Close()
 		return
 	}
-
 	s.mux.Lock()
 	var session *Session
 	var ok bool
-
 	switch msg.Type {
 	case "create":
 		code := strings.ToUpper(msg.Code)
@@ -186,7 +172,6 @@ func (s *Server) handleWebSocketConnections(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	s.mux.Unlock()
-
 	session.AddClient(ws)
 }
 
@@ -203,7 +188,6 @@ func (s *Session) AddClient(conn *websocket.Conn) {
 	}
 	s.Clients[playerID] = client
 	s.mux.Unlock()
-
 	conn.WriteJSON(ServerResponse{Type: "welcome", ID: playerID, Code: s.Code})
 	log.Printf("Player %s (%s) has joined session %s.", playerID, conn.RemoteAddr(), s.Code)
 	go client.Listen(s)
@@ -213,7 +197,6 @@ func (s *Session) AddClient(conn *websocket.Conn) {
 func (s *Session) RemoveClient(playerID string, shouldCloseConn bool) {
 	s.mux.Lock()
 	defer s.mux.Unlock()
-
 	if client, ok := s.Clients[playerID]; ok {
 		if shouldCloseConn {
 			client.Conn.Close()
@@ -227,13 +210,11 @@ func (s *Session) RemoveClient(playerID string, shouldCloseConn bool) {
 func (s *Session) BroadcastState() {
 	s.mux.Lock()
 	defer s.mux.Unlock()
-
 	for _, client := range s.Clients {
 		player, ok := s.GameState.Players[client.PlayerID]
 		if !ok {
 			continue
 		}
-
 		teamworkRadius := 8
 		teamworkBonusPerAlly := 2
 		nearbyAllyCount := 0
@@ -248,22 +229,18 @@ func (s *Session) BroadcastState() {
 		}
 		effectiveVision := player.VisionRadius + (nearbyAllyCount * teamworkBonusPerAlly)
 		visibleTilesMap := game.CalculateVisibility(player.Position, effectiveVision)
-		
 		visibleForJSON := []dungeon.Point{}
 		for p := range visibleTilesMap {
 			visibleForJSON = append(visibleForJSON, p)
 		}
-
 		itemsForJSON := []game.ItemOnGroundJSON{}
 		for pos, item := range s.GameState.ItemsOnGround {
 			itemsForJSON = append(itemsForJSON, game.ItemOnGroundJSON{Position: pos, Item: item})
 		}
-		
 		highlighted := []dungeon.Point{}
 		if player.Status == "targeting" && player.Target != nil {
 			highlighted = game.GetLineOfSightPath(player.Position, *player.Target)
 		}
-
 		stateForJSON := game.GameStateForJSON{
 			Dungeon:          s.GameState.Dungeon,
 			Monsters:         s.GameState.Monsters,
@@ -296,69 +273,55 @@ func (c *Client) Listen(s *Session) {
 	}
 }
 
-
 func (s *Session) RunLoop() {
-	defer func() {
-		log.Printf("Session %s RunLoop ended.", s.Code)
-		// Clean up any remaining connections when the loop exits.
-		for id := range s.Clients {
-			s.RemoveClient(id, true)
-		}
-		s.cleanup <- s.Code
-	}()
+    defer func() {
+        log.Printf("Session %s RunLoop ended.", s.Code)
+        s.cleanup <- s.Code
+    }()
 
-	for cmd := range s.CommandStream {
-		if cmd.Command == "quit" {
-			s.RemoveClient(cmd.PlayerID, true) // A quit command should close the connection.
-			// If this was the last player, end the session.
-			if len(s.Clients) == 0 {
-				log.Printf("Session %s is empty, closing.", s.Code)
-				s.mux.Lock()
-				s.IsOver = true
-				s.mux.Unlock()
-				return
-			}
-		} else {
-			playersWhoWon, endTurnEarly := game.ProcessPlayerCommand(cmd.PlayerID, cmd.Command, &s.GameState)
-			if !endTurnEarly {
-				game.UpdateMonsters(&s.GameState)
-			}
-
-			allPlayersDefeated := len(s.GameState.Players) > 0
-			for _, p := range s.GameState.Players {
-				if p.Status == "playing" || p.Status == "targeting" {
-					allPlayersDefeated = false
-					break
-				}
-			}
-
-			// THE DEFINITIVE FIX:
-			if len(playersWhoWon) > 0 || allPlayersDefeated {
-				var result string
-				if allPlayersDefeated {
-					result = "defeat"
-					s.GameState.AddMessage("All players have been defeated! The dungeon claims its victims.")
-				} else {
-					result = "victory"
-				}
-
-				s.BroadcastState() // Send final game state
-				time.Sleep(100 * time.Millisecond) // Give it a moment to send
-
-				s.BroadcastGameOver(result) // Send the final gameOver message
-				time.Sleep(100 * time.Millisecond) // Give it a moment to send
-
-				s.mux.Lock()
-				s.IsOver = true
-				s.mux.Unlock()
-
-				// We NO LONGER close connections here. We simply end the loop.
-				log.Printf("Session %s has ended. The loop will now terminate.", s.Code)
-				return
-			}
-		}
-		s.BroadcastState()
-	}
+    for cmd := range s.CommandStream {
+        if cmd.Command == "quit" {
+            s.RemoveClient(cmd.PlayerID, true)
+            if len(s.Clients) == 0 {
+                log.Printf("Session %s is empty, closing.", s.Code)
+                s.mux.Lock()
+                s.IsOver = true
+                s.mux.Unlock()
+                return
+            }
+        } else {
+            playersWhoWon, endTurnEarly := game.ProcessPlayerCommand(cmd.PlayerID, cmd.Command, &s.GameState)
+            if !endTurnEarly {
+                game.UpdateMonsters(&s.GameState)
+            }
+            allPlayersDefeated := len(s.GameState.Players) > 0
+            for _, p := range s.GameState.Players {
+                if p.Status == "playing" || p.Status == "targeting" {
+                    allPlayersDefeated = false
+                    break
+                }
+            }
+            if len(playersWhoWon) > 0 || allPlayersDefeated {
+                var result string
+                if allPlayersDefeated {
+                    result = "defeat"
+                    s.GameState.AddMessage("All players have been defeated! The dungeon claims its victims.")
+                } else {
+                    result = "victory"
+                }
+                s.BroadcastState()
+                time.Sleep(100 * time.Millisecond)
+                s.BroadcastGameOver(result)
+                time.Sleep(100 * time.Millisecond)
+                s.mux.Lock()
+                s.IsOver = true
+                s.mux.Unlock()
+                log.Printf("Session %s has ended. The loop will now terminate, leaving connections open.", s.Code)
+                return
+            }
+        }
+        s.BroadcastState()
+    }
 }
 
 func main() {
@@ -370,10 +333,9 @@ func main() {
 	if port == "" {
 		port = "8080"
 	}
-	http.ListenAndServe(":"+port, nil)
-	
 	log.Printf("Game server starting on port %s", port)
 	if err := http.ListenAndServe(":"+port, nil); err != nil {
 		log.Fatal("ListenAndServe:", err)
 	}
 }
+
