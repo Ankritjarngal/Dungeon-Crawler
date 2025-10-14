@@ -80,12 +80,12 @@ Built entirely in Go, the server acts as the authoritative Game Master, managing
 ## Gameplay Showcase
 
 ![Gameplay Screenshot](./githubImages/Screenshot%20from%202025-10-14%2013-27-05.png)
-![Gameplay Screenshot](./githubImages/image.png)
 ![Gameplay Screenshot](./githubImages/Screenshot%20from%202025-10-14%2013-27-19.png)
 ![Gameplay Screenshot](./githubImages/Screenshot%20from%202025-10-14%2013-28-29.png)
 ![Gameplay Screenshot](./githubImages/Screenshot%20from%202025-10-14%2013-29-12.png)
-![Gameplay Screenshot](./githubImages/Screenshot%20from%202025-10-14%2013-30-04.png)
 ![Gameplay Screenshot](./githubImages/Screenshot%20from%202025-10-14%2013-31-09.png)
+![Gameplay Screenshot](./githubImages/image.png)
+![Gameplay Screenshot](./githubImages/Screenshot%20from%202025-10-14%2013-30-04.png)
 
 ---
 
