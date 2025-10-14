@@ -15,15 +15,21 @@ import (
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 )
-
 var upgrader = websocket.Upgrader{
-	ReadBufferSize:  1024,
-	WriteBufferSize: 1024,
-	CheckOrigin: func(r *http.Request) bool {
-		origin := r.Header.Get("Origin")
-		return origin == "http://localhost:5173" || origin == ""
-	},
+    ReadBufferSize:  1024,
+    WriteBufferSize: 1024,
+    CheckOrigin: func(r *http.Request) bool {
+        origin := r.Header.Get("Origin")
+        if strings.HasPrefix(origin, "http://localhost") || origin == "" {
+            return true
+        }
+        if strings.HasPrefix(origin, "https://dungeon-explorer-kappa.vercel.app/") {
+            return true
+        }
+        return false
+    },
 }
+
 
 type InitialMessage struct {
 	Type string `json:"type"`
@@ -364,6 +370,8 @@ func main() {
 	if port == "" {
 		port = "8080"
 	}
+	http.ListenAndServe(":"+port, nil)
+	
 	log.Printf("Game server starting on port %s", port)
 	if err := http.ListenAndServe(":"+port, nil); err != nil {
 		log.Fatal("ListenAndServe:", err)
