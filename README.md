@@ -95,7 +95,7 @@ Follow the commands below to set up and run the server locally.
 
 ```bash
 # 1. Clone the repository
-git clone [https://github.com/Ankritjarngal/Dungeon-Crawler](https://github.com/Ankritjarngal/Dungeon-Crawler)
+git clone https://github.com/Ankritjarngal/Dungeon-Crawler
 cd Dungeon-Crawler
 
 # 2. Install dependencies (fetch required Go modules)
