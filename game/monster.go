@@ -69,6 +69,18 @@ var Bestiary = map[string]MonsterTemplate{
 		AttackRange:  1,
 		MovingSpeed: 3,
 	},
+	"guardian": {
+		Name:         "Guardian",
+		Rune:         'G', 
+		Color:        dungeon.ColorYellow, 
+		HP:           60, 
+		Attack:       18, 
+		SpawnType:    "guardian", 
+		VisionRadius: 6,  
+		LeashRadius:  15, 
+		AttackRange:  3,
+		MovingSpeed:  2,  
+	},
 	
 }
 
@@ -106,11 +118,41 @@ func (m *Monster) Move(dx, dy int, state *GameState) {
 	m.Position = newPos
 }
 
-func SpawnMonsters(validSpawnPoints []dungeon.Point) []*Monster {
+func SpawnMonsters(validSpawnPoints []dungeon.Point , exitPos dungeon.Point ) []*Monster {
 	source := rand.NewSource(time.Now().UnixNano())
 	random := rand.New(source)
-	totalMonstersToSpawn := 25
+
+
+	var guardianSpawnPoint dungeon.Point
+	foundSpawn := false
+	for _, p := range validSpawnPoints {
+		if Distance(p, exitPos) <= 5 {
+			guardianSpawnPoint = p
+			foundSpawn = true
+			break
+		}
+	}
+	
 	var monsters []*Monster
+	if foundSpawn {
+		guardianTemplate := Bestiary["guardian"]
+		guardian := &Monster{
+			Template:   &guardianTemplate,
+			Position:   guardianSpawnPoint,
+			CurrentHP:  guardianTemplate.HP,
+			SpawnPoint: guardianSpawnPoint,
+		}
+		monsters = append(monsters, guardian)
+
+		var newValidSpawns []dungeon.Point
+		for _, p := range validSpawnPoints {
+			if p != guardianSpawnPoint {
+				newValidSpawns = append(newValidSpawns, p)
+			}
+		}
+		validSpawnPoints = newValidSpawns
+	}
+	totalMonstersToSpawn := 25
 	var monsterKeys []string
 	for k := range Bestiary {
 		monsterKeys = append(monsterKeys, k)
@@ -150,18 +192,15 @@ func SpawnMonsters(validSpawnPoints []dungeon.Point) []*Monster {
 }
 
 
-// Replace the entire UpdateMonsters function in your monster.go file.
 
 func UpdateMonsters(state *GameState) {
-	state.Log = []string{} // Clear the log at the start of the monster turn
+	state.Log = []string{} 
 
 	for _, monster := range state.Monsters {
-		// --- THE NEW "TARGETING SYSTEM" ---
-		// For each monster, it must find its own closest target.
+
 		var closestPlayer *Player
 		minDist := -1
 
-		// This loop is the monster's "eyes". It scans all active players.
 		for _, player := range state.Players {
 			if player.Status != "playing" {
 				continue
@@ -173,15 +212,44 @@ func UpdateMonsters(state *GameState) {
 			}
 		}
 
-		// If there are no active players left on the map, monsters do nothing.
 		if closestPlayer == nil {
 			continue
 		}
-		// --- END OF TARGETING SYSTEM ---
 
-		// The rest of the AI now uses the 'closestPlayer' that this specific monster found.
+
+		if monster.Template.Name == "Guardian" {
+			distToPlayer := Distance(monster.Position, closestPlayer.Position)
+			if distToPlayer <= monster.Template.AttackRange && LineOfSight(monster.Position, closestPlayer.Position, state.Dungeon) {
+				damage := monster.Template.Attack
+				if closestPlayer.EquippedArmor != nil {
+					brokenArmor := closestPlayer.EquippedArmor
+					closestPlayer.EquippedArmor.Durability -= damage
+					state.AddMessage(fmt.Sprintf("%s's armor absorbs %d damage!", closestPlayer.ID[0:4], damage))
+					if closestPlayer.EquippedArmor.Durability <= 0 {
+						state.AddMessage(fmt.Sprintf("%s's %s breaks!", closestPlayer.ID[0:4], closestPlayer.EquippedArmor.Name))
+						closestPlayer.EquippedArmor = nil
+						var newInventory []*Item
+						for _, item := range closestPlayer.Inventory {
+							if item != brokenArmor {
+								newInventory = append(newInventory, item)
+							}
+						}
+						closestPlayer.Inventory = newInventory
+					}
+				} else {
+					closestPlayer.HP -= damage
+					state.AddMessage(fmt.Sprintf("The Guardian smites %s from afar, causing %d damage", monster.Template.Name, closestPlayer.ID[0:4], damage))
+				}
+				if closestPlayer.HP <= 0 {
+					closestPlayer.Status = "defeated"
+					state.AddMessage(fmt.Sprintf("%s has been defeated by a %s!", closestPlayer.ID[0:4], monster.Template.Name))
+				}
+				continue
+			}
+		}
+
+
 		
-		// Skeleton Archer ranged attack logic
 		if monster.Template.Name == "Skeleton Archer" {
 			distToPlayer := Distance(monster.Position, closestPlayer.Position)
 			if distToPlayer <= monster.Template.AttackRange && LineOfSight(monster.Position, closestPlayer.Position, state.Dungeon) {
@@ -213,7 +281,7 @@ func UpdateMonsters(state *GameState) {
 			}
 		}
 
-		// Melee attack if adjacent
+
 		distToPlayer := Distance(monster.Position, closestPlayer.Position)
 		if distToPlayer == 1 {
 			damage := monster.Template.Attack

@@ -82,7 +82,7 @@ func generateRoomCode() string {
 
 func NewSession(code string, cleanup chan<- string) *Session {
 	dungeonMap, floorTiles, _, endPos, itemLocations := dungeon.GenerateDungeon(dungeon.MapWidth, dungeon.MapHeight)
-	monsters := game.SpawnMonsters(floorTiles)
+	monsters := game.SpawnMonsters(floorTiles,endPos)
 	items := make(map[dungeon.Point]*game.Item)
 	for pos, name := range itemLocations {
 		itemTemplate := game.ItemTemplates[name]
