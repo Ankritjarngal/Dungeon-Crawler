@@ -27,7 +27,7 @@ var ItemTemplates = map[string]Item{
 		Rune:     '(',
 		Color:    dungeon.ColorWhite,
 		IsWeapon: true,
-		Damage:   7,
+		Damage:   5,
 		Range:    6,
 	},
 	"chainmail": {
@@ -37,4 +37,5 @@ var ItemTemplates = map[string]Item{
 		IsArmor:    true,
 		Durability: 20,
 	},
+	
 }
